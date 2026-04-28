@@ -1,0 +1,44 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging / build artefacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Pipeline run outputs (project.md section 6).
+# These are produced by the orchestrator on every run and must never enter the repo.
+# tests/fixtures/ is intentionally NOT ignored: CLAUDE.md hard rule 2 requires
+# committed fixture outputs for offline tests.
+runs/
+
+# Per-developer Claude Code state.
+# .claude/settings.json and .claude/{agents,commands}/ stay tracked.
+.claude/settings.local.json
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor noise
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
