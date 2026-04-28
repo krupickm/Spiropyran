@@ -1,0 +1,26 @@
+your-repo/
+├── CLAUDE.md
+├── insilico-screening.md
+├── project.md
+├── src/
+│   └── ...your package...
+├── tests/
+│   └── fixtures/
+│       ├── orca_outputs/
+│       ├── crest_outputs/
+│       └── xtb_outputs/
+└── .claude/
+    ├── settings.json
+    ├── agents/
+    │   ├── spec-checker.md
+    │   ├── output-parser.md
+    │   ├── test-runner.md
+    │   ├── literature-checker.md
+    │   └── code-reviewer.md
+    └── commands/
+        ├── plan.md
+        ├── implement.md
+        ├── add-stage.md
+        ├── check-spec.md
+        ├── run-tests.md
+        └── session-summary.md

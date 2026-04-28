@@ -1,0 +1,19 @@
+# SMARTS patterns used by the prep stage to identify atom roles in a
+# canonical spiropyran. Patterns are deliberately narrow so they fail loudly
+# on non-spiropyran inputs.
+#
+# CHEMIST REVIEW REQUIRED
+# -----------------------
+# These v0 patterns match the BIPS-family closed spiropyran scaffold
+# (sp3 spiro carbon shared between an indoline N-side and a chromene O-side).
+# They will fail on:
+#   - open merocyanine forms (the C-O bond is broken)
+#   - spiro scaffolds where the spiro carbon is not directly N- and O-substituted
+#   - any structure outside the closed BIPS-family connectivity
+# Update before running scaffolds beyond closed BIPS-family spiropyrans.
+
+atom_roles:
+  # sp3 carbon, member of two rings, bonded to one N and one O neighbour.
+  spiro_carbon: "[#6;X4;R2](-[#7])(-[#8])"
+  # ring oxygen (X2, in one ring) bonded to a ring-junction sp3 carbon.
+  chromene_oxygen: "[#8;X2;R1]-[#6;X4;R2]"

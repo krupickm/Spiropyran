@@ -1,0 +1,29 @@
+[project]
+name = "spiropyran_dr"
+version = "0.1.0"
+description = "In-silico screening pipeline for spiropyran photoswitches: SMILES to predicted diastereomeric ratio."
+requires-python = ">=3.10"
+dependencies = [
+    "rdkit>=2023.9",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["spiropyran_dr*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+spiropyran_dr = ["config/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

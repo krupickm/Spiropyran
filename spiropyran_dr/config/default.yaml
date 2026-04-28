@@ -1,0 +1,7 @@
+# Default pipeline configuration.
+# Only the sections needed by stages currently implemented are present.
+# Other sections (mecp, dft, crest, ...) will be added as their stages land.
+
+filtering:
+  smarts_required: []
+  smarts_forbidden: []
