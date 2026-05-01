@@ -48,8 +48,9 @@ pytest
 ```
 
 Tests live under `tests/` and run entirely on the developer's laptop with no
-cluster access (CLAUDE.md hard rule 2). They cover stage 1's pure helpers and
-the full `submit` / `collect` / `is_ready` contract.
+cluster access (CLAUDE.md hard rule 2). They cover stage 1's pure helpers,
+the full `submit` / `collect` / `is_ready` contract, the YAML loaders, and
+the CLI's exit codes and output.
 
 ## Linting and formatting
 
@@ -65,6 +66,8 @@ Default `ruff` configuration; no project overrides yet.
 ```
 spiropyran_dr/
   __init__.py
+  __main__.py                # enables `python -m spiropyran_dr`
+  cli.py                     # argparse CLI (currently: prep subcommand)
   config_utils.py            # YAML loading for config + smarts
   config/
     default.yaml             # filtering block only at this stage
@@ -75,8 +78,10 @@ spiropyran_dr/
                              # stereocentre handling, sidecar JSON write
 tests/
   conftest.py                # shared SMILES fixtures (BIPS, methyl-BIPS, etc.)
+  test_cli.py
   test_config_utils.py
   test_prep.py
+stage_notes.md               # dated decision log appended per session
 ```
 
 The full target layout (orchestrator, PBS templates, all stages) is documented
