@@ -45,6 +45,48 @@ def test_load_smarts_requires_spiro_carbon(tmp_path: Path) -> None:
         load_smarts(p)
 
 
+def test_load_smarts_requires_indoline_nitrogen(tmp_path: Path) -> None:
+    p = tmp_path / "s.yaml"
+    p.write_text(
+        "atom_roles:\n"
+        "  spiro_carbon: '[#6]'\n"
+        "  chromene_oxygen: '[#8]'\n"
+        "  gem_carbon: '[#6]'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(KeyError, match="indoline_nitrogen"):
+        load_smarts(p)
+
+
+def test_load_smarts_requires_gem_carbon(tmp_path: Path) -> None:
+    p = tmp_path / "s.yaml"
+    p.write_text(
+        "atom_roles:\n"
+        "  spiro_carbon: '[#6]'\n"
+        "  chromene_oxygen: '[#8]'\n"
+        "  indoline_nitrogen: '[#7]'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(KeyError, match="gem_carbon"):
+        load_smarts(p)
+
+
+def test_load_config_surfaces_mm_defaults() -> None:
+    cfg = load_config(DEFAULT_CONFIG)
+    assert cfg["mm"]["n_embed"] >= 1
+    assert cfg["mm"]["rmsd_threshold_angstrom"] > 0
+    assert cfg["ensemble"]["max_conformers_per_diastereomer"] >= 1
+
+
+def test_load_config_user_mm_overrides_defaults(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("mm:\n  n_embed: 7\n", encoding="utf-8")
+    cfg = load_config(p)
+    assert cfg["mm"]["n_embed"] == 7
+    assert cfg["mm"]["random_seed"] == 42  # default surfaces through
+    assert cfg["ensemble"]["max_conformers_per_diastereomer"] == 20
+
+
 def test_load_yaml_invalid_raises(tmp_path: Path) -> None:
     p = tmp_path / "bad.yaml"
     p.write_text("key: : :\n", encoding="utf-8")

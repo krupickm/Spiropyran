@@ -17,3 +17,9 @@ atom_roles:
   spiro_carbon: "[#6;X4;R2](-[#7])(-[#8])"
   # ring oxygen (X2, in one ring) bonded to a ring-junction sp3 carbon.
   chromene_oxygen: "[#8;X2;R1]-[#6;X4;R2]"
+  # sp3 indoline nitrogen (X3, in one ring), bonded to the spiro sp3 carbon.
+  indoline_nitrogen: "[#7;X3;R1]-[#6;X4;R2]"
+  # gem-disubstituted sp3 carbon in the indoline 5-ring, adjacent to spiro.
+  # In project-typical scaffolds this carbon bears methyl + R(big) and is
+  # itself a stereocentre; for plain BIPS both substituents are methyl.
+  gem_carbon: "[#6;X4;R1]-[#6;X4;R2]"

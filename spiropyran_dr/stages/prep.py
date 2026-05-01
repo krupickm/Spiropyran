@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,6 +8,7 @@ from typing import Any
 from rdkit import Chem
 
 from spiropyran_dr.config_utils import load_smarts
+from spiropyran_dr.io_utils import atomic_write_json
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SMARTS_PATH = PACKAGE_ROOT / "config" / "smarts.yaml"
@@ -118,22 +117,39 @@ def sanity_check(mol: Chem.Mol) -> list[str]:
     return errors
 
 
-def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=".tmp_", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, sort_keys=True)
-        os.replace(tmp_name, path)
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except FileNotFoundError:
-            pass
-        raise
+def _find_indoline_n_and_gem_c(
+    mol: Chem.Mol, spiro_idx: int, smarts_cfg: dict[str, Any]
+) -> tuple[int, int]:
+    """Locate the indoline N and the gem-disubstituted indoline carbon.
+
+    Both atoms are looked up by SMARTS from smarts_cfg['atom_roles']; we then
+    sanity-check that they sit in the same 5-membered ring as the spiro carbon
+    so a malformed scaffold fails here rather than producing nonsense
+    geometry downstream.
+    """
+    n_idx = find_atom_by_smarts(
+        mol, smarts_cfg["atom_roles"]["indoline_nitrogen"], "indoline_nitrogen"
+    )
+    gem_idx = find_atom_by_smarts(
+        mol, smarts_cfg["atom_roles"]["gem_carbon"], "gem_carbon"
+    )
+    rings = mol.GetRingInfo().AtomRings()
+    five_rings_with_spiro = [r for r in rings if len(r) == 5 and spiro_idx in r]
+    if not any(n_idx in r and gem_idx in r for r in five_rings_with_spiro):
+        raise PrepError(
+            "indoline_nitrogen and gem_carbon are not in the same 5-ring "
+            f"as spiro_carbon (spiro={spiro_idx}, N={n_idx}, gem={gem_idx})"
+        )
+    return n_idx, gem_idx
 
 
-def _stereocentres_payload(mol: Chem.Mol, spiro_idx: int, spiro_cip: str) -> dict[str, Any]:
+def _stereocentres_payload(
+    mol: Chem.Mol,
+    spiro_idx: int,
+    spiro_cip: str,
+    indoline_n_idx: int,
+    gem_c_idx: int,
+) -> dict[str, Any]:
     Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
     centres: list[dict[str, Any]] = []
     for atom in mol.GetAtoms():
@@ -149,6 +165,8 @@ def _stereocentres_payload(mol: Chem.Mol, spiro_idx: int, spiro_cip: str) -> dic
     return {
         "spiro_carbon_idx": spiro_idx,
         "spiro_cip": spiro_cip,
+        "indoline_nitrogen_idx": indoline_n_idx,
+        "gem_carbon_idx": gem_c_idx,
         "stereocentres": centres,
     }
 
@@ -232,6 +250,7 @@ def submit(
         chromene_o_idx = find_atom_by_smarts(
             mol, smarts_cfg["atom_roles"]["chromene_oxygen"], "chromene_oxygen"
         )
+        indoline_n_idx, gem_c_idx = _find_indoline_n_and_gem_c(mol, spiro_idx, smarts_cfg)
         stereo_mol, spiro_cip = assign_spiro_stereo(mol, spiro_idx)
     except PrepError as exc:
         return {
@@ -243,7 +262,10 @@ def submit(
 
     sidecar_rel = Path("prep") / "stereocentres.json"
     sidecar_abs = workspace / sidecar_rel
-    _atomic_write_json(sidecar_abs, _stereocentres_payload(stereo_mol, spiro_idx, spiro_cip))
+    atomic_write_json(
+        sidecar_abs,
+        _stereocentres_payload(stereo_mol, spiro_idx, spiro_cip, indoline_n_idx, gem_c_idx),
+    )
 
     return {
         "status": "done",
@@ -255,6 +277,8 @@ def submit(
             "smiles_syn": smiles_canonical,
             "spiro_carbon_idx": spiro_idx,
             "chromene_oxygen_idx": chromene_o_idx,
+            "indoline_nitrogen_idx": indoline_n_idx,
+            "gem_carbon_idx": gem_c_idx,
             "spiro_cip": spiro_cip,
             "smarts_filter": filter_result,
             "stereocentres_path": str(sidecar_rel).replace(os.sep, "/"),

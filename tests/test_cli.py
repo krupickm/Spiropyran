@@ -63,6 +63,43 @@ def test_cli_no_subcommand_errors(capsys: pytest.CaptureFixture[str]) -> None:
     assert excinfo.value.code == 2
 
 
+def test_cli_mm_chiral_bips_succeeds(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(
+        [
+            "mm",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "20",
+            "--seed",
+            "42",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "status: done" in captured.out
+    assert "n_conformers_anti:" in captured.out
+    assert "n_conformers_syn:" in captured.out
+    assert (tmp_path / "mm" / "anti").is_dir()
+    assert (tmp_path / "mm" / "syn").is_dir()
+    assert (tmp_path / "mm" / "conformers.json").exists()
+
+
+def test_cli_mm_invalid_smiles_returns_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["mm", "not a smiles", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "failed" in captured.err.lower()
+
+
 def test_cli_prep_respects_custom_smarts_path(
     tmp_path: Path,
     bips_smiles: str,

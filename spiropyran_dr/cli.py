@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from spiropyran_dr.config_utils import load_config
-from spiropyran_dr.stages import prep
+from spiropyran_dr.stages import mm, prep
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_ROOT / "config" / "default.yaml"
@@ -48,6 +48,48 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit the full submit() return dict as JSON on stdout.",
     )
 
+    p_mm = sub.add_parser(
+        "mm",
+        help="Run stages 1-2 (prep + MM) on a single SMILES.",
+    )
+    p_mm.add_argument("smiles", help="Input SMILES string for the closed spiropyran.")
+    p_mm.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("./run_scratch"),
+        help="Workspace directory; mm/{anti,syn}/conf_*.xyz are written here.",
+    )
+    p_mm.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Path to pipeline config YAML.",
+    )
+    p_mm.add_argument(
+        "--smarts",
+        type=Path,
+        default=DEFAULT_SMARTS,
+        help="Path to atom-role SMARTS YAML.",
+    )
+    p_mm.add_argument(
+        "--n-embed",
+        type=int,
+        default=None,
+        help="Override mm.n_embed from config (e.g. for fast smoke runs).",
+    )
+    p_mm.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override mm.random_seed from config.",
+    )
+    p_mm.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full submit() return dict as JSON on stdout.",
+    )
+
     return parser
 
 
@@ -77,10 +119,53 @@ def _run_prep(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "done" else 1
 
 
+def _run_mm(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    config.setdefault("paths", {})["smarts"] = str(args.smarts)
+    if args.n_embed is not None:
+        config["mm"]["n_embed"] = args.n_embed
+    if args.seed is not None:
+        config["mm"]["random_seed"] = args.seed
+
+    args.workspace.mkdir(parents=True, exist_ok=True)
+    manifest: dict = {"smiles_input": args.smiles, "stages": {}}
+    prep_result = prep.submit(manifest, args.workspace, config)
+    manifest["stages"]["prep"] = prep_result
+    if prep_result["status"] != "done":
+        if args.as_json:
+            json.dump(prep_result, sys.stdout, indent=2, sort_keys=True)
+            sys.stdout.write("\n")
+        else:
+            print("status: failed (prep)", file=sys.stderr)
+            print(f"reason: {prep_result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+        return 1
+
+    result = mm.submit(manifest, args.workspace, config)
+
+    if args.as_json:
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        if result["status"] == "done":
+            out = result["outputs"]
+            print("status: done")
+            print(f"n_conformers_anti: {out['n_conformers_anti']}")
+            print(f"n_conformers_syn:  {out['n_conformers_syn']}")
+            print(f"anti_xyz_dir:      {args.workspace / out['anti_xyz_dir']}")
+            print(f"syn_xyz_dir:       {args.workspace / out['syn_xyz_dir']}")
+        else:
+            print("status: failed", file=sys.stderr)
+            print(f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+
+    return 0 if result["status"] == "done" else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "prep":
         return _run_prep(args)
+    if args.command == "mm":
+        return _run_mm(args)
     parser.error(f"unknown command: {args.command}")
     return 2

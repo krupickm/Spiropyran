@@ -32,6 +32,15 @@ def methyl_bips_smiles() -> str:
 
 
 @pytest.fixture
+def chiral_bips_smiles() -> str:
+    # 1-ethyl-1-methyl variant: gem-disubstituted indoline carbon bears
+    # ethyl + methyl, so it is itself a stereocentre. Used by stage-2 tests
+    # to get a real anti/syn split (BIPS gem-dimethyl is symmetric and has
+    # no diastereomer at that centre).
+    return "CCC1(C)c2ccccc2N(C)C13Oc4ccccc4C=C3"
+
+
+@pytest.fixture
 def non_spiro_smiles() -> str:
     return "CCO"
 

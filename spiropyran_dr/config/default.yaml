@@ -5,3 +5,19 @@
 filtering:
   smarts_required: []
   smarts_forbidden: []
+
+# Stage 2 (MM) knobs. Defaults match project.md section 10.2 ("N ~50").
+# - n_embed: ETKDGv3 conformer attempts. Higher = better diastereomer
+#   coverage at MM cost; 50 is a balance for typical drug-like spiropyrans.
+# - mmff_max_iters: per-conformer MMFF94 optimisation cap.
+# - rmsd_threshold_angstrom: greedy clustering distance (heavy atoms only).
+#   0.5 A keeps physically distinct conformers and merges near-duplicates.
+# - random_seed: ETKDG seed for reproducible test runs.
+mm:
+  n_embed: 50
+  mmff_max_iters: 200
+  rmsd_threshold_angstrom: 0.5
+  random_seed: 42
+
+ensemble:
+  max_conformers_per_diastereomer: 20

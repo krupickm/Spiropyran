@@ -169,12 +169,21 @@ def test_submit_bips_writes_sidecar_and_returns_done(
     assert out["smiles_canonical"]
     assert out["spiro_carbon_idx"] >= 0
     assert out["chromene_oxygen_idx"] >= 0
+    assert out["indoline_nitrogen_idx"] >= 0
+    assert out["gem_carbon_idx"] >= 0
     assert out["spiro_cip"] in ("R", "S")
     assert out["smarts_filter"]["passed"] is True
+
+    mol = Chem.MolFromSmiles(out["smiles_canonical"])
+    assert mol.GetAtomWithIdx(out["indoline_nitrogen_idx"]).GetSymbol() == "N"
+    assert mol.GetAtomWithIdx(out["gem_carbon_idx"]).GetSymbol() == "C"
+
     sidecar = tmp_path / "prep" / "stereocentres.json"
     assert sidecar.exists()
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     assert payload["spiro_carbon_idx"] == out["spiro_carbon_idx"]
+    assert payload["indoline_nitrogen_idx"] == out["indoline_nitrogen_idx"]
+    assert payload["gem_carbon_idx"] == out["gem_carbon_idx"]
     assert payload["spiro_cip"] == out["spiro_cip"]
     assert any(c["is_spiro_centre"] for c in payload["stereocentres"])
 
