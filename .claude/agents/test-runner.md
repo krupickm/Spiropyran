@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 
-You run the test suite and report results in a way that does not flood the main context.
+You run the test suite and report results in a way that does not flood the main context. Use powershell to execute python.
 
 ## Workflow
 1. By default, run `pytest -x --tb=short -q` from the repo root.
