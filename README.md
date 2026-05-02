@@ -10,9 +10,9 @@ for this repo.
 
 ## Status
 
-Stage 1 (`prep`) is implemented, with a minimal CLI for invoking it on a
-single SMILES. The orchestrator (`pipeline.py`), PBS infrastructure, and
-stages 2-7 are not yet written.
+Stages 1 (`prep`) and 2 (`mm`) are implemented, with a minimal CLI for
+invoking each on a single SMILES. The orchestrator (`pipeline.py`), PBS
+infrastructure, and stages 3-7 are not yet written.
 
 ## Requirements
 
@@ -48,9 +48,10 @@ pytest
 ```
 
 Tests live under `tests/` and run entirely on the developer's laptop with no
-cluster access (CLAUDE.md hard rule 2). They cover stage 1's pure helpers,
-the full `submit` / `collect` / `is_ready` contract, the YAML loaders, and
-the CLI's exit codes and output.
+cluster access (CLAUDE.md hard rule 2). They cover the pure helpers and
+full `submit` / `collect` / `is_ready` contract for stages 1 and 2, the
+XYZ writer and atomic JSON writer in `io_utils`, the YAML loaders, and the
+CLI's exit codes and output.
 
 ## Linting and formatting
 
@@ -67,19 +68,25 @@ Default `ruff` configuration; no project overrides yet.
 spiropyran_dr/
   __init__.py
   __main__.py                # enables `python -m spiropyran_dr`
-  cli.py                     # argparse CLI (currently: prep subcommand)
+  cli.py                     # argparse CLI (subcommands: prep, mm)
   config_utils.py            # YAML loading for config + smarts
+  io_utils.py                # XYZ writer/reader, atomic JSON writer
   config/
-    default.yaml             # filtering block only at this stage
+    default.yaml             # filtering, mm, ensemble blocks at this stage
     smarts.yaml              # atom-role SMARTS (chemist review pending)
   stages/
     base.py                  # Stage Protocol
     prep.py                  # stage 1: SMILES validation, atom-role lookup,
                              # stereocentre handling, sidecar JSON write
+    mm.py                    # stage 2: ETKDGv3 + MMFF94, dihedral-based
+                             # anti/syn labelling, RMSD clustering, XYZ + sidecar
 tests/
-  conftest.py                # shared SMILES fixtures (BIPS, methyl-BIPS, etc.)
+  conftest.py                # shared SMILES fixtures (BIPS, methyl-BIPS,
+                             # chiral-BIPS, ...)
   test_cli.py
   test_config_utils.py
+  test_io_utils.py
+  test_mm.py
   test_prep.py
 stage_notes.md               # dated decision log appended per session
 ```
@@ -110,6 +117,30 @@ Useful flags:
 
 Exit code is 0 on success, 1 when the stage returns `failed`, 2 on usage
 errors. On failure the reason is printed on stderr.
+
+## Running the mm stage
+
+Runs stage 1 and stage 2 back-to-back: prep produces the atom indices, mm
+embeds N (~50) ETKDGv3 conformers, MMFF94-optimises them, labels each
+conformer `anti` or `syn` from the signed dihedral
+`chromene_O – C_spiro – indoline_N – indoline_anchor` (positive → anti,
+negative → syn; see [`project.md`](project.md) §10.2 and the
+[`mm.py`](spiropyran_dr/stages/mm.py) module docstring for the rationale),
+RMSD-clusters within each label, and writes
+`mm/{anti,syn}/conf_{i}.xyz` plus a `mm/conformers.json` sidecar.
+
+```bash
+spiropyran-dr mm "CC1(C)c2ccccc2N(C)C13Oc4ccccc4C=C3"
+```
+
+Useful flags (in addition to those listed for `prep`):
+
+- `--n-embed N` — override `mm.n_embed` from config (e.g. `20` for fast
+  smoke runs).
+- `--seed S` — override `mm.random_seed`.
+
+The stage returns `failed` if either diastereomer ends up with zero
+conformers after labelling and clustering.
 
 ## Using the prep stage from Python
 

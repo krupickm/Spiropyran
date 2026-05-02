@@ -4,22 +4,24 @@ See project.md section 10.2 for the spec.
 
 Design choices worth revisiting later:
 
-- Indoline ring as the reference plane: the 5-membered ring is the most
-  stable plane in the closed-form scaffold, and the spiro carbon's sp3
-  pucker is small enough that including it in the SVD plane fit does not
-  meaningfully tilt the plane.
-- Anti/syn convention: project the chromene oxygen and the "big" gem-C
-  substituent onto the indoline plane normal. Same sign of signed
-  displacement => "syn"; opposite sign => "anti". Using the gem-C big
-  substituent (not a global axis) makes the label invariant to molecular
-  orientation in space; it is a relationship between two physically
-  meaningful atoms. For BIPS (gem-dimethyl, no real diastereomer at the
-  gem centre) the labelling will not split and the stage fails -- this is
-  intentional, BIPS is not a project-target scaffold.
-- "Big" substituent identification: heavy-atom subtree size of the two
-  non-ring neighbours of the gem carbon, ties broken by lower atom index
-  for determinism. CIP-rank-based tie breaking would be more chemically
-  rigorous but is overkill for the gem-C asymmetric scaffolds we target.
+- Anti/syn convention: signed dihedral
+  ``chromene_O - C_spiro - indoline_N - indoline_anchor`` where
+  ``indoline_anchor`` is the unique indoline-ring atom bonded to the
+  indoline N other than the spiro carbon (the aromatic C in BIPS).
+  Positive sign => "anti"; negative => "syn". The choice is arbitrary
+  but deterministic, and chirality inversion at the spiro carbon flips
+  the sign cleanly -- which is exactly what we need. Project molecules
+  are achiral or racemic, so we pick one enantiomer of the closed
+  product as the "anti" reference arbitrarily and let the dihedral sign
+  decide per conformer. This convention lets BIPS (gem-dimethyl,
+  symmetric) split correctly because ETKDG samples both spiro
+  enantiomers from the connectivity-only canonical SMILES.
+  Alternatives considered: (a) signed plane-displacement of chromene-O
+  vs. a "big" gem-C substituent -- rejected because it depends on
+  picking a "big" substituent, which is ambiguous for BIPS and made the
+  labeller invariant under spiro chirality flip; (b) improper dihedral
+  centred on the spiro C -- equivalent in information content but less
+  intuitive to reason about than a real chain dihedral.
 - RMSD clustering: greedy / exemplar-style with rdMolAlign best-RMS over
   symmetry-equivalent atom mappings. Chosen over Butina because it directly
   yields "energy minima, deduplicated"; Butina would need a separate step
@@ -36,7 +38,7 @@ from typing import Any, Literal
 
 import numpy as np
 from rdkit import Chem
-from rdkit.Chem import AllChem, rdMolAlign
+from rdkit.Chem import AllChem, rdMolAlign, rdMolTransforms
 
 from spiropyran_dr.io_utils import atomic_write_json, write_xyz
 
@@ -82,97 +84,57 @@ def indoline_ring_atom_indices(
     return tuple(candidates[0])
 
 
-def _heavy_subtree_size(mol: Chem.Mol, start_idx: int, blocked_idx: int) -> int:
-    """Count heavy atoms reachable from start_idx without crossing blocked_idx."""
-    seen = {blocked_idx}
-    stack = [start_idx]
-    count = 0
-    while stack:
-        idx = stack.pop()
-        if idx in seen:
-            continue
-        seen.add(idx)
-        atom = mol.GetAtomWithIdx(idx)
-        if atom.GetAtomicNum() <= 1:
-            continue
-        count += 1
-        for nb in atom.GetNeighbors():
-            if nb.GetIdx() not in seen:
-                stack.append(nb.GetIdx())
-    return count
-
-
-def identify_big_gem_substituent(
-    mol: Chem.Mol, gem_idx: int, indoline_ring: tuple[int, ...]
+def indoline_anchor_atom(
+    mol: Chem.Mol,
+    indoline_ring: tuple[int, ...],
+    spiro_idx: int,
+    indoline_n_idx: int,
 ) -> int:
-    """Return the atom index of the larger non-ring substituent on the gem carbon.
+    """Return the unique indoline-ring atom bonded to N other than spiro_C.
 
-    Selection rule: heavy-atom subtree size, descending. Ties broken by
-    lower atom index for determinism. See module docstring for rationale.
+    For closed BIPS-family scaffolds this is the aromatic carbon at the
+    indoline-benzene fusion, on the nitrogen side. It serves as the fourth
+    atom of the labelling dihedral (chromene_O - C_spiro - N - anchor).
     """
-    gem = mol.GetAtomWithIdx(gem_idx)
-    candidates: list[tuple[int, int, int]] = []
-    for nb in gem.GetNeighbors():
-        if nb.GetIdx() in indoline_ring or nb.GetAtomicNum() <= 1:
-            continue
-        size = _heavy_subtree_size(mol, nb.GetIdx(), gem_idx)
-        # Sort by (-size, idx) so larger subtree wins; ties: lower idx wins.
-        candidates.append((-size, nb.GetIdx(), nb.GetIdx()))
-    if not candidates:
+    n_atom = mol.GetAtomWithIdx(indoline_n_idx)
+    candidates = [
+        nb.GetIdx()
+        for nb in n_atom.GetNeighbors()
+        if nb.GetIdx() in indoline_ring and nb.GetIdx() != spiro_idx
+    ]
+    if len(candidates) != 1:
         raise MMError(
-            f"gem carbon {gem_idx} has no non-ring heavy neighbours"
+            f"expected exactly 1 indoline anchor for N {indoline_n_idx}, "
+            f"got {candidates!r}"
         )
-    candidates.sort()
-    return candidates[0][1]
+    return candidates[0]
 
 
 # -- geometric labelling --------------------------------------------------
-
-
-def _plane_normal(coords: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return (centroid, unit normal) of the best-fit plane via SVD."""
-    centroid = coords.mean(axis=0)
-    centred = coords - centroid
-    _, _, vh = np.linalg.svd(centred, full_matrices=False)
-    normal = vh[-1]
-    n_norm = np.linalg.norm(normal)
-    if n_norm < 1e-9:
-        raise MMError("degenerate plane in indoline-ring SVD")
-    return centroid, normal / n_norm
 
 
 def label_conformer(
     mol: Chem.Mol,
     conf_id: int,
     indoline_ring: tuple[int, ...],
+    spiro_idx: int,
+    indoline_n_idx: int,
     chromene_o_idx: int,
-    big_sub_idx: int,
 ) -> Label:
-    """Assign 'anti' or 'syn' from 3D geometry alone.
+    """Assign 'anti' or 'syn' from the signed labelling dihedral.
 
-    Convention: same sign of signed normal-axis displacement => 'syn';
-    opposite => 'anti'. See module docstring for the rationale.
+    Dihedral chain: chromene_O - C_spiro - indoline_N - indoline_anchor.
+    Sign convention: positive => 'anti', negative => 'syn'. Arbitrary but
+    deterministic; chirality inversion at the spiro carbon flips the sign,
+    which is what makes BIPS split into two equally-populated labels even
+    though it has no asymmetric centre. See module docstring.
     """
+    anchor = indoline_anchor_atom(mol, indoline_ring, spiro_idx, indoline_n_idx)
     conf = mol.GetConformer(conf_id)
-    ring_xyz = np.array(
-        [
-            [
-                conf.GetAtomPosition(i).x,
-                conf.GetAtomPosition(i).y,
-                conf.GetAtomPosition(i).z,
-            ]
-            for i in indoline_ring
-        ]
+    angle_deg = rdMolTransforms.GetDihedralDeg(
+        conf, chromene_o_idx, spiro_idx, indoline_n_idx, anchor
     )
-    centroid, normal = _plane_normal(ring_xyz)
-
-    def _signed(idx: int) -> float:
-        p = conf.GetAtomPosition(idx)
-        return float(np.array([p.x, p.y, p.z]).dot(normal) - centroid.dot(normal))
-
-    d_o = _signed(chromene_o_idx)
-    d_r = _signed(big_sub_idx)
-    return "syn" if (d_o * d_r) > 0 else "anti"
+    return "anti" if angle_deg > 0.0 else "syn"
 
 
 # -- embedding ------------------------------------------------------------
@@ -265,7 +227,6 @@ def submit(
     spiro_idx = prep_outputs["spiro_carbon_idx"]
     chromene_o_idx = prep_outputs["chromene_oxygen_idx"]
     indoline_n_idx = prep_outputs["indoline_nitrogen_idx"]
-    gem_c_idx = prep_outputs["gem_carbon_idx"]
 
     mm_cfg = config.get("mm") or {}
     n_embed = int(mm_cfg.get("n_embed", 50))
@@ -286,7 +247,9 @@ def submit(
 
     try:
         ring = indoline_ring_atom_indices(mol_h, spiro_idx, indoline_n_idx)
-        big_sub = identify_big_gem_substituent(mol_h, gem_c_idx, ring)
+        # Validate the anchor exists; the labeller would re-discover it per
+        # conformer, but failing fast here keeps error messages crisp.
+        indoline_anchor_atom(mol_h, ring, spiro_idx, indoline_n_idx)
     except MMError as exc:
         return {
             "status": "failed",
@@ -297,7 +260,9 @@ def submit(
 
     labelled: dict[Label, list[tuple[int, float]]] = {"anti": [], "syn": []}
     for cid, energy in pairs:
-        lab = label_conformer(mol_h, cid, ring, chromene_o_idx, big_sub)
+        lab = label_conformer(
+            mol_h, cid, ring, spiro_idx, indoline_n_idx, chromene_o_idx
+        )
         labelled[lab].append((cid, energy))
 
     # Already energy-sorted because pairs is sorted; dedupe within each label.

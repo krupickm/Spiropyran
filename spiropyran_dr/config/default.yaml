@@ -20,4 +20,5 @@ mm:
   random_seed: 42
 
 ensemble:
+  energy_window_kj_mol: 20.0      # discard conformers above this from Boltzmann avg (used by aggregate stage)
   max_conformers_per_diastereomer: 20

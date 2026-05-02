@@ -76,6 +76,7 @@ def test_load_config_surfaces_mm_defaults() -> None:
     assert cfg["mm"]["n_embed"] >= 1
     assert cfg["mm"]["rmsd_threshold_angstrom"] > 0
     assert cfg["ensemble"]["max_conformers_per_diastereomer"] >= 1
+    assert cfg["ensemble"]["energy_window_kj_mol"] > 0
 
 
 def test_load_config_user_mm_overrides_defaults(tmp_path: Path) -> None:

@@ -181,7 +181,13 @@ Single source of truth per molecule. JSON, hand-editable, lives at
                      "outputs": { ... } },
     "mm":          { "status": "done", "outputs":
                      { "n_conformers_anti": 12, "n_conformers_syn": 14,
-                       "anti_xyz_dir": "mm/anti", "syn_xyz_dir": "mm/syn" } },
+                       "anti_xyz_dir": "mm/anti", "syn_xyz_dir": "mm/syn",
+                       "anti": [ { "conf_id": 0, "embed_id": 7,
+                                   "xyz": "mm/anti/conf_0.xyz",
+                                   "mmff_energy_kcal_mol": 12.34,
+                                   "label": "anti" }, "..." ],
+                       "syn":  [ "..." ],
+                       "sidecar_path": "mm/conformers.json" } },
     "crest":       { "status": "running", "pbs_job_ids":
                      { "anti": "12345.meta-pbs", "syn": "12346.meta-pbs" },
                      "submitted_at": "..." },
@@ -361,6 +367,13 @@ mecp:
 
 temperature_kelvin: 298.15
 
+mm:
+  n_embed: 50                    # ETKDGv3 attempts; balances diastereomer
+                                 # coverage against MM cost
+  mmff_max_iters: 200            # MMFF94 optimisation cap per conformer
+  rmsd_threshold_angstrom: 0.5   # heavy-atom greedy clustering threshold
+  random_seed: 42                # ETKDG seed for reproducible embeds
+
 crest:
   method: gfn2
   ewin_kcal_mol: 6.0
@@ -468,23 +481,40 @@ spiropyran_dr/
   - `smiles_canonical`, `smiles_anti`, `smiles_syn` (the latter two are the
     same connectivity SMILES; the anti/syn distinction is geometric and
     assigned at the mm stage).
-  - `spiro_carbon_idx`, `chromene_oxygen_idx`.
+  - `spiro_carbon_idx`, `chromene_oxygen_idx`,
+    `indoline_nitrogen_idx`, `gem_carbon_idx` (atom indices in the canonical
+    SMILES order; the latter two are required by the mm-stage geometric
+    labeller and by the xtb_constr stage's distance constraint).
+  - `spiro_cip` (R/S of the arbitrarily-fixed spiro stereocentre, recorded
+    in `prep/stereocentres.json` for downstream traceability;
+    `smiles_canonical` itself is connectivity-only).
+  - `smarts_filter`: required/forbidden SMARTS check result.
+  - `stereocentres_path`: relative path to the stereocentres JSON sidecar.
 
 ### 10.2 mm (local)
 
 - Input: SMILES + atom indices from prep.
 - Action:
   - RDKit ETKDGv3 to embed N (~50) conformers of the closed spiropyran.
-  - MMFF94 optimise.
-  - For each conformer, measure the relevant geometric parameter
-    (dihedral around the spiro centre, sign of out-of-plane displacement of
-    the indoline nitrogen relative to the chromene plane) and label as
-    `anti` or `syn`.
-  - Cluster within each label by RMSD; keep up to
-    `ensemble.max_conformers_per_diastereomer` lowest-energy per label.
-  - Write `mm/{anti,syn}/conf_{i}.xyz`.
-- Output: per-diastereomer lists of XYZ paths.
-- Failure modes: ETKDG fails to generate either label (log + fail).
+    The canonical SMILES is connectivity-only, so ETKDG samples both
+    spiro-carbon enantiomers across embeds, which is what makes the
+    geometric label split.
+  - MMFF94 optimise; energies in kcal/mol.
+  - Label each conformer by the signed dihedral
+    `chromene_O – C_spiro – indoline_N – indoline_anchor`, where
+    `indoline_anchor` is the unique indoline-ring atom bonded to the
+    indoline N other than the spiro carbon (the aromatic C in BIPS).
+    Convention: positive sign → `anti`, negative → `syn`. The choice is
+    arbitrary but deterministic; chirality inversion at C_spiro flips the
+    sign, which is what we want. See `spiropyran_dr/stages/mm.py` for the
+    full rationale and the alternatives that were considered.
+  - Cluster within each label by RMSD (greedy, lowest-energy retained per
+    cluster); keep up to `ensemble.max_conformers_per_diastereomer`
+    lowest-energy per label.
+  - Write `mm/{anti,syn}/conf_{i}.xyz` plus `mm/conformers.json` sidecar.
+- Output: per-diastereomer lists of XYZ paths and MMFF energies.
+- Failure modes: ETKDG fails to embed any conformer; or after labelling
+  one of the two diastereomers ends up empty (log + fail).
 
 ### 10.3 crest (PBS, two parallel jobs)
 

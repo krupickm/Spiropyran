@@ -14,7 +14,7 @@ from spiropyran_dr.stages.base import Stage
 from spiropyran_dr.stages.mm import (
     MMError,
     cluster_by_rmsd,
-    identify_big_gem_substituent,
+    indoline_anchor_atom,
     indoline_ring_atom_indices,
     label_conformer,
 )
@@ -80,35 +80,10 @@ def test_indoline_ring_raises_when_n_and_spiro_not_in_same_5ring() -> None:
         indoline_ring_atom_indices(mol, spiro_idx=1, indoline_n_idx=0)
 
 
-# -- pure functions: gem substituent --------------------------------------
+# -- pure functions: indoline anchor --------------------------------------
 
 
-def test_identify_big_gem_substituent_picks_ethyl_in_chiral_bips(
-    chiral_bips_smiles: str,
-    tmp_path: Path,
-    default_config_path: Path,
-    smarts_config_path: Path,
-) -> None:
-    manifest = _run_prep(
-        chiral_bips_smiles, tmp_path, default_config_path, smarts_config_path
-    )
-    out = manifest["stages"]["prep"]["outputs"]
-    mol = Chem.MolFromSmiles(out["smiles_canonical"])
-    ring = indoline_ring_atom_indices(
-        mol, out["spiro_carbon_idx"], out["indoline_nitrogen_idx"]
-    )
-    big = identify_big_gem_substituent(mol, out["gem_carbon_idx"], ring)
-    # The ethyl carbon's subtree size (2 heavy atoms: itself + the terminal
-    # methyl) must beat the methyl substituent (1 heavy atom).
-    big_atom = mol.GetAtomWithIdx(big)
-    assert big_atom.GetSymbol() == "C"
-    n_heavy_neighbours = sum(
-        1 for nb in big_atom.GetNeighbors() if nb.GetAtomicNum() > 1
-    )
-    assert n_heavy_neighbours >= 2  # bonded to gem-C and to its terminal methyl
-
-
-def test_identify_big_gem_substituent_deterministic_on_bips_ties(
+def test_indoline_anchor_is_aromatic_neighbour_of_n(
     bips_smiles: str,
     tmp_path: Path,
     default_config_path: Path,
@@ -120,16 +95,22 @@ def test_identify_big_gem_substituent_deterministic_on_bips_ties(
     ring = indoline_ring_atom_indices(
         mol, out["spiro_carbon_idx"], out["indoline_nitrogen_idx"]
     )
-    a = identify_big_gem_substituent(mol, out["gem_carbon_idx"], ring)
-    b = identify_big_gem_substituent(mol, out["gem_carbon_idx"], ring)
-    assert a == b
-    assert mol.GetAtomWithIdx(a).GetSymbol() == "C"
+    anchor = indoline_anchor_atom(
+        mol, ring, out["spiro_carbon_idx"], out["indoline_nitrogen_idx"]
+    )
+    atom = mol.GetAtomWithIdx(anchor)
+    assert atom.GetSymbol() == "C"
+    assert atom.GetIsAromatic()
+    assert anchor in ring
+    assert anchor != out["spiro_carbon_idx"]
+    nbrs = {nb.GetIdx() for nb in atom.GetNeighbors()}
+    assert out["indoline_nitrogen_idx"] in nbrs
 
 
 # -- pure functions: labeller ---------------------------------------------
 
 
-def test_label_conformer_flips_when_o_face_flips(
+def test_label_conformer_flips_when_chromene_o_face_flips(
     bips_smiles: str,
     tmp_path: Path,
     default_config_path: Path,
@@ -145,23 +126,24 @@ def test_label_conformer_flips_when_o_face_flips(
     ring = indoline_ring_atom_indices(
         mol_h, out["spiro_carbon_idx"], out["indoline_nitrogen_idx"]
     )
-    big = identify_big_gem_substituent(mol_h, out["gem_carbon_idx"], ring)
 
     label_a = label_conformer(
         mol_h,
         conf_id=0,
         indoline_ring=ring,
+        spiro_idx=out["spiro_carbon_idx"],
+        indoline_n_idx=out["indoline_nitrogen_idx"],
         chromene_o_idx=out["chromene_oxygen_idx"],
-        big_sub_idx=big,
     )
 
-    # Reflect the chromene oxygen through the indoline plane by flipping the
-    # sign of its component along the plane normal. Cheap proxy: invert all
-    # coordinates of the O atom relative to the ring centroid -- this is
-    # enough to flip its signed displacement.
-    conf = mol_h.GetConformer(0)
+    # Mirror the chromene oxygen across the plane spanned by C_spiro and N
+    # (i.e. reflect through the line C_spiro--N in the C_spiro--N--anchor
+    # plane). Easiest proxy: reflect through the indoline-ring SVD plane.
+    # That flips the labelling dihedral's sign because O moves to the other
+    # face while C_spiro, N and anchor stay put.
     import numpy as np
 
+    conf = mol_h.GetConformer(0)
     ring_xyz = np.array(
         [
             [
@@ -181,15 +163,17 @@ def test_label_conformer_flips_when_o_face_flips(
     proj = (o_xyz - centroid).dot(normal)
     new_xyz = o_xyz - 2.0 * proj * normal
     conf.SetAtomPosition(
-        out["chromene_oxygen_idx"], (float(new_xyz[0]), float(new_xyz[1]), float(new_xyz[2]))
+        out["chromene_oxygen_idx"],
+        (float(new_xyz[0]), float(new_xyz[1]), float(new_xyz[2])),
     )
 
     label_b = label_conformer(
         mol_h,
         conf_id=0,
         indoline_ring=ring,
+        spiro_idx=out["spiro_carbon_idx"],
+        indoline_n_idx=out["indoline_nitrogen_idx"],
         chromene_o_idx=out["chromene_oxygen_idx"],
-        big_sub_idx=big,
     )
     assert {label_a, label_b} == {"anti", "syn"}
 
@@ -262,6 +246,24 @@ def test_is_ready_requires_prep_done(tmp_path: Path) -> None:
 
 def test_collect_is_noop(tmp_path: Path) -> None:
     assert mm.collect({}, tmp_path, {}) == {}
+
+
+def test_submit_succeeds_on_unsubstituted_bips(
+    tmp_path: Path,
+    bips_smiles: str,
+    default_config_path: Path,
+    smarts_config_path: Path,
+) -> None:
+    # Even though BIPS has a symmetric gem centre and is achiral overall,
+    # ETKDG samples both spiro enantiomers from the connectivity-only
+    # canonical SMILES, and the dihedral-sign labeller splits them.
+    config = _config(default_config_path, smarts_config_path)
+    manifest = _run_prep(bips_smiles, tmp_path, default_config_path, smarts_config_path)
+    result = mm.submit(manifest, tmp_path, config)
+    assert result["status"] == "done", result
+    out = result["outputs"]
+    assert out["n_conformers_anti"] >= 1
+    assert out["n_conformers_syn"] >= 1
 
 
 def test_submit_writes_xyz_files_and_sidecar(

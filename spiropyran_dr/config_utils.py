@@ -24,6 +24,7 @@ MM_DEFAULTS: dict[str, Any] = {
 }
 
 ENSEMBLE_DEFAULTS: dict[str, Any] = {
+    "energy_window_kj_mol": 20.0,
     "max_conformers_per_diastereomer": 20,
 }
 
