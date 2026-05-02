@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from spiropyran_dr.config_utils import load_config
-from spiropyran_dr.stages import mm, prep
+from spiropyran_dr.stages import crest_stage, mm, prep
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_ROOT / "config" / "default.yaml"
@@ -90,6 +90,49 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit the full submit() return dict as JSON on stdout.",
     )
 
+    p_crest = sub.add_parser(
+        "crest",
+        help="Run stages 1-3 (prep + MM + CREST submit). Submits PBS jobs and "
+        "exits; collect runs separately once jobs finish.",
+    )
+    p_crest.add_argument("smiles", help="Input SMILES string for the closed spiropyran.")
+    p_crest.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("./run_scratch"),
+        help="Workspace directory; crest/{anti,syn}/ are created here.",
+    )
+    p_crest.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Path to pipeline config YAML.",
+    )
+    p_crest.add_argument(
+        "--smarts",
+        type=Path,
+        default=DEFAULT_SMARTS,
+        help="Path to atom-role SMARTS YAML.",
+    )
+    p_crest.add_argument(
+        "--n-embed",
+        type=int,
+        default=None,
+        help="Override mm.n_embed from config.",
+    )
+    p_crest.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override mm.random_seed from config.",
+    )
+    p_crest.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full submit() return dict as JSON on stdout.",
+    )
+
     return parser
 
 
@@ -106,14 +149,14 @@ def _run_prep(args: argparse.Namespace) -> int:
     else:
         if result["status"] == "done":
             out = result["outputs"]
-            print(f"status: done")
+            print("status: done")
             print(f"smiles_canonical:   {out['smiles_canonical']}")
             print(f"spiro_carbon_idx:   {out['spiro_carbon_idx']}")
             print(f"chromene_oxygen_idx:{out['chromene_oxygen_idx']}")
             print(f"spiro_cip:          {out['spiro_cip']}")
             print(f"sidecar:            {args.workspace / out['stereocentres_path']}")
         else:
-            print(f"status: failed", file=sys.stderr)
+            print("status: failed", file=sys.stderr)
             print(f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr)
 
     return 0 if result["status"] == "done" else 1
@@ -160,6 +203,57 @@ def _run_mm(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "done" else 1
 
 
+def _run_crest(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    config.setdefault("paths", {})["smarts"] = str(args.smarts)
+    if args.n_embed is not None:
+        config["mm"]["n_embed"] = args.n_embed
+    if args.seed is not None:
+        config["mm"]["random_seed"] = args.seed
+
+    args.workspace.mkdir(parents=True, exist_ok=True)
+    manifest: dict = {"smiles_input": args.smiles, "stages": {}}
+
+    prep_result = prep.submit(manifest, args.workspace, config)
+    manifest["stages"]["prep"] = prep_result
+    if prep_result["status"] != "done":
+        if args.as_json:
+            json.dump(prep_result, sys.stdout, indent=2, sort_keys=True)
+            sys.stdout.write("\n")
+        else:
+            print("status: failed (prep)", file=sys.stderr)
+            print(f"reason: {prep_result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+        return 1
+
+    mm_result = mm.submit(manifest, args.workspace, config)
+    manifest["stages"]["mm"] = mm_result
+    if mm_result["status"] != "done":
+        if args.as_json:
+            json.dump(mm_result, sys.stdout, indent=2, sort_keys=True)
+            sys.stdout.write("\n")
+        else:
+            print("status: failed (mm)", file=sys.stderr)
+            print(f"reason: {mm_result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+        return 1
+
+    result = crest_stage.submit(manifest, args.workspace, config)
+
+    if args.as_json:
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        if result["status"] == "submitted":
+            print("status: submitted")
+            for label, jobid in result["pbs_job_ids"].items():
+                print(f"{label} jobid: {jobid}")
+            print(f"work_dirs: {args.workspace / 'crest'}")
+        else:
+            print("status: failed", file=sys.stderr)
+            print(f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+
+    return 0 if result["status"] == "submitted" else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -167,5 +261,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_prep(args)
     if args.command == "mm":
         return _run_mm(args)
+    if args.command == "crest":
+        return _run_crest(args)
     parser.error(f"unknown command: {args.command}")
     return 2

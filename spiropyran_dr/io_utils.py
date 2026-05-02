@@ -34,12 +34,7 @@ def write_xyz(
 
 
 def read_xyz(path: Path) -> tuple[list[str], list[tuple[float, float, float]], str]:
-    """Parse a single-frame XYZ file into (symbols, coords, comment).
-
-    Minimal reader: assumes the file is well-formed and the header line is
-    a non-negative integer. Used by tests for round-trip checks; not yet a
-    multi-frame CREST-output reader.
-    """
+    """Parse a single-frame XYZ file into (symbols, coords, comment)."""
     text = path.read_text(encoding="utf-8").splitlines()
     n = int(text[0].strip())
     comment = text[1] if len(text) > 1 else ""
@@ -50,6 +45,78 @@ def read_xyz(path: Path) -> tuple[list[str], list[tuple[float, float, float]], s
         symbols.append(parts[0])
         coords.append((float(parts[1]), float(parts[2]), float(parts[3])))
     return symbols, coords, comment
+
+
+def read_xyz_multiframe(
+    path: Path,
+) -> list[tuple[list[str], list[tuple[float, float, float]], str]]:
+    """Parse a multi-frame XYZ (CREST `crest_conformers.xyz` format).
+
+    Each frame: count line, comment line, then `count` "symbol x y z" lines.
+    Blank lines between frames are tolerated.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    frames: list[tuple[list[str], list[tuple[float, float, float]], str]] = []
+    i = 0
+    while i < len(lines):
+        if not lines[i].strip():
+            i += 1
+            continue
+        n = int(lines[i].strip())
+        comment = lines[i + 1] if i + 1 < len(lines) else ""
+        symbols: list[str] = []
+        coords: list[tuple[float, float, float]] = []
+        for raw in lines[i + 2 : i + 2 + n]:
+            parts = raw.split()
+            symbols.append(parts[0])
+            coords.append((float(parts[1]), float(parts[2]), float(parts[3])))
+        if len(symbols) != n:
+            raise ValueError(
+                f"{path}: frame at line {i} declares {n} atoms but only "
+                f"{len(symbols)} parsed"
+            )
+        frames.append((symbols, coords, comment))
+        i += 2 + n
+    return frames
+
+
+def read_crest_energies(path: Path) -> list[float]:
+    """Parse `crest.energies` -> list of energies in Hartree.
+
+    Tolerates one-column (`E`) or two-column (`idx E`) layouts by taking
+    the last numeric token of each non-blank line. This matches what
+    CREST has emitted across recent versions.
+    """
+    energies: list[float] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        tokens = stripped.split()
+        energies.append(float(tokens[-1]))
+    return energies
+
+
+def write_xyz_from_arrays(
+    path: Path,
+    symbols: list[str],
+    coords: list[tuple[float, float, float]],
+    comment: str = "",
+) -> None:
+    """Write a single XYZ frame from raw arrays (no RDKit Mol needed).
+
+    Used to dump filtered CREST conformers, where we have only symbols and
+    coordinates from a parsed ensemble file.
+    """
+    if len(symbols) != len(coords):
+        raise ValueError(
+            f"length mismatch: {len(symbols)} symbols vs {len(coords)} coords"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"{len(symbols)}", comment]
+    for sym, (x, y, z) in zip(symbols, coords):
+        lines.append(f"{sym} {x:.8f} {y:.8f} {z:.8f}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

@@ -88,6 +88,31 @@ def test_load_config_user_mm_overrides_defaults(tmp_path: Path) -> None:
     assert cfg["ensemble"]["max_conformers_per_diastereomer"] == 20
 
 
+def test_load_config_surfaces_crest_defaults() -> None:
+    cfg = load_config(DEFAULT_CONFIG)
+    assert cfg["crest"]["walltime_hours"] >= 1
+    assert isinstance(cfg["crest"]["script_path"], str) and cfg["crest"]["script_path"]
+
+
+def test_load_config_user_crest_overrides_defaults(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text(
+        "crest:\n  walltime_hours: 6\n  script_path: /tmp/sub_crest.sh\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(p)
+    assert cfg["crest"]["walltime_hours"] == 6
+    assert cfg["crest"]["script_path"] == "/tmp/sub_crest.sh"
+
+
+def test_load_config_missing_crest_uses_defaults(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("temperature_kelvin: 298.15\n", encoding="utf-8")
+    cfg = load_config(p)
+    assert "walltime_hours" in cfg["crest"]
+    assert "script_path" in cfg["crest"]
+
+
 def test_load_yaml_invalid_raises(tmp_path: Path) -> None:
     p = tmp_path / "bad.yaml"
     p.write_text("key: : :\n", encoding="utf-8")

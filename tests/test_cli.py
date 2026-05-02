@@ -100,6 +100,46 @@ def test_cli_mm_invalid_smiles_returns_failure(
     assert "failed" in captured.err.lower()
 
 
+def test_cli_crest_smoke_submits_two_pbs_jobs(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Subprocess is monkeypatched -- no real qsub. Verifies the CLI
+    # plumbs prep -> mm -> crest.submit and reports both jobids.
+    from spiropyran_dr.stages import crest_stage
+
+    counter = {"n": 0}
+
+    def fake_submit(script, args, cwd):  # type: ignore[no-untyped-def]
+        counter["n"] += 1
+        jobid = f"{2000 + counter['n']}.meta-pbs"
+        return jobid, jobid + "\n"
+
+    monkeypatch.setattr(crest_stage, "submit_via_script", fake_submit)
+
+    rc = main(
+        [
+            "crest",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "20",
+            "--seed",
+            "42",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "status: submitted" in captured.out
+    assert "anti jobid:" in captured.out
+    assert "syn jobid:" in captured.out
+    assert (tmp_path / "crest" / "anti" / "input.xyz").is_file()
+    assert (tmp_path / "crest" / "syn" / "jobid").is_file()
+
+
 def test_cli_prep_respects_custom_smarts_path(
     tmp_path: Path,
     bips_smiles: str,

@@ -60,7 +60,7 @@ SMILES (one molecule)
                                geometric anti/syn labelling
     ▼
 [3] crest           PBS        GFN2-xTB conformational sampling on closed ground
-                               state, per diastereomer; ewin-filtered ensemble
+                               state, per diastereomer; count-capped ensemble
     ▼
 [4] xtb_constr      PBS        TS-mimetic: GFN2-xTB constrained opt with C-O
                                distance fixed at MECP value, per conformer
@@ -105,12 +105,19 @@ and resumes from where it stopped. Polling interval should be configurable
 A PBS job is considered finished when **either** of the following is true:
 
 - `qstat -f <job_id>` returns a terminal state (`C`, `F`, or job not found).
-- The expected output sentinel file exists in the stage's work directory
-  (e.g. `crest_done` or `orca.out` with a normal-termination string).
+- The expected output sentinel file exists in the stage's work directory.
 
 The output-file check is authoritative for success; `qstat` is the running
-indicator. After detecting finish, parse outputs and decide success vs failure
-by checking the sentinel file's contents (e.g. `ORCA TERMINATED NORMALLY`).
+indicator. After detecting finish, parse outputs and decide success vs
+failure by inspecting the stage's natural success signal. Per-stage
+sentinels:
+
+- **crest**: presence of *both* `crest_conformers.xyz` and `crest.energies`
+  in the work directory. CREST writes them only on a clean exit; absence
+  of either => failure. No separate `crest_done` flag file.
+- **xtb_constr**: `xtbopt.xyz` present and the C-O distance constraint
+  satisfied within tolerance.
+- **dft_sp / dft_freq**: `ORCA TERMINATED NORMALLY` string in `orca.out`.
 
 ### 3.2 Module loading
 
@@ -133,8 +140,16 @@ def submit(manifest: dict, workspace: Path, config: dict) -> dict:
     """Do the work (local stages) or write inputs + qsub (PBS stages).
     Returns a dict to merge into manifest['stages'][stage_name]:
       - status: 'done' | 'submitted' | 'failed'
-      - For PBS stages: pbs_job_id, submitted_at, work_dir
+      - started_at: ISO timestamp (always)
+      - For PBS stages: pbs_job_ids (dict[label_or_conf_id, str]),
+        submitted_at. Stages that submit a single job per diastereomer
+        (crest) key by label; stages that submit per conformer
+        (xtb_constr, dft_sp, dft_freq) key by a flat
+        '{label}/conf_{i}' string. Per-job work directories are
+        derivable from the workspace and stage conventions; they
+        are not stored in the manifest.
       - For local stages: outputs (stage-specific dict), finished_at
+      - For status=='failed': failure_reason (str), finished_at
     """
 
 def collect(manifest: dict, workspace: Path, config: dict) -> dict:
@@ -267,10 +282,13 @@ Walltime / queue settings are not part of the hash.
                 ├── crest/
                 │   ├── anti/
                 │   │   ├── input.xyz
-                │   │   ├── pbs.sh
+                │   │   ├── CRESTJOB_input_<pid>.sh   (written by sub_crest.sh)
                 │   │   ├── jobid
+                │   │   ├── input.crest.log
                 │   │   ├── crest_conformers.xyz
-                │   │   └── crest.energies
+                │   │   ├── crest.energies
+                │   │   └── filtered/
+                │   │       └── conf_{0..K}.xyz
                 │   └── syn/ ...
                 ├── xtb_constr/
                 │   ├── anti/
@@ -375,10 +393,15 @@ mm:
   random_seed: 42                # ETKDG seed for reproducible embeds
 
 crest:
-  method: gfn2
-  ewin_kcal_mol: 6.0
-  threads: 16
-  walltime: "24:00:00"
+  walltime_hours: 24                # int, passed as 1st positional arg to sub_crest.sh
+  script_path: "/storage/brno2/home/krupickm/bin/sub_crest.sh"
+                                    # absolute path to the user-maintained CREST submission
+                                    # wrapper. The wrapper hardcodes NPROC=7 (experimentally
+                                    # optimal on MetaCentrum) and calls qsub itself; the
+                                    # Python orchestrator does not render its own PBS script
+                                    # for CREST and does not pass any CREST flags -- it
+                                    # trusts the wrapper plus CREST defaults (GFN2 search,
+                                    # ewin = 6 kcal/mol).
 
 xtb_constr:
   method: gfn2
@@ -441,23 +464,32 @@ spiropyran_dr/
 │   └── aggregate.py
 ├── templates/
 │   ├── pbs_orchestrator.j2
-│   ├── pbs_crest.j2
 │   ├── pbs_xtb_constrained.j2
 │   ├── pbs_orca_sp.j2
 │   └── pbs_orca_freq.j2
+│   # Note: no pbs_crest.j2. CREST submission is delegated to the
+│   # user-maintained sub_crest.sh wrapper (config: crest.script_path).
 ├── config/
 │   ├── default.yaml
 │   └── smarts.yaml
 ├── tools/
 │   ├── inspect_manifest.py
 │   └── resubmit_failed.py
-├── tests/
-│   ├── test_io_utils.py
-│   ├── test_pbs_utils.py
-│   ├── test_prep.py
-│   ├── test_mm.py
-│   └── test_aggregate.py
 └── cli.py                   # entry point: predict_dr.py
+
+# Tests live at the repo root, alongside spiropyran_dr/, not inside it:
+tests/
+├── conftest.py
+├── fixtures/                # canned QC outputs (CREST, ORCA, xTB)
+│   └── crest/{anti,syn}/{crest_conformers.xyz, crest.energies}
+├── test_io_utils.py
+├── test_config_utils.py
+├── test_pbs_utils.py
+├── test_prep.py
+├── test_mm.py
+├── test_crest_stage.py
+├── test_aggregate.py
+└── test_cli.py
 ```
 
 ---
@@ -519,12 +551,18 @@ spiropyran_dr/
 ### 10.3 crest (PBS, two parallel jobs)
 
 - Input: lowest-energy MM conformer per diastereomer (one xyz per submission).
-- Action: render `pbs_crest.j2` for each diastereomer, `qsub`, record both
-  job IDs.
+- Action: copy that conformer to `crest/{label}/input.xyz` and invoke
+  `sub_crest.sh <walltime_hours> input.xyz` from that directory. The wrapper
+  writes its own PBS script (`CRESTJOB_input_<pid>.sh`) and submits it via
+  `qsub`; we capture the qsub stdout to record the PBS job id. No CREST
+  flags are passed -- threading (NPROC=7), method (GFN2), and ewin
+  (6 kcal/mol) all come from the wrapper plus CREST defaults. NPROC=7 is
+  experimentally optimal on MetaCentrum and is owned by `sub_crest.sh`.
 - `collect`: parse `crest_conformers.xyz` (multi-frame XYZ) and
-  `crest.energies`. Filter by `crest.ewin_kcal_mol`, take up to
-  `ensemble.max_conformers_per_diastereomer` lowest-energy. Write filtered
-  conformers as `crest/{anti,syn}/filtered/conf_{i}.xyz` for downstream stages.
+  `crest.energies`. Take up to `ensemble.max_conformers_per_diastereomer`
+  lowest-energy conformers (no extra ewin filter; CREST already applied
+  its own). Write the survivors as `crest/{anti,syn}/filtered/conf_{i}.xyz`
+  for downstream stages.
 - Output: filtered conformer XYZ paths and CREST energies per diastereomer.
 
 ### 10.4 xtb_constr (PBS, one job per conformer per diastereomer)

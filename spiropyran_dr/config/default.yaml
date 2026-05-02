@@ -22,3 +22,14 @@ mm:
 ensemble:
   energy_window_kj_mol: 20.0      # discard conformers above this from Boltzmann avg (used by aggregate stage)
   max_conformers_per_diastereomer: 20
+
+# Stage 3 (CREST) submission. CREST is run via the user-maintained
+# `sub_crest.sh` wrapper, which writes its own PBS file and qsub's it.
+# That wrapper hardcodes NPROC=7 (experimentally optimal on MetaCentrum)
+# and the orchestrator passes no CREST flags -- we trust the wrapper plus
+# CREST defaults (GFN2 search, ewin = 6 kcal/mol).
+# - walltime_hours: integer hours, passed as the wrapper's first positional arg.
+# - script_path: absolute path to the wrapper on the cluster.
+crest:
+  walltime_hours: 24
+  script_path: "/storage/brno2/home/krupickm/bin/sub_crest.sh"

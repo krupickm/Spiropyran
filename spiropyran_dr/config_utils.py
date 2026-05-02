@@ -28,6 +28,14 @@ ENSEMBLE_DEFAULTS: dict[str, Any] = {
     "max_conformers_per_diastereomer": 20,
 }
 
+# CREST submission is delegated to a user-maintained wrapper script that
+# owns NPROC, queue, and other PBS settings; we only supply walltime (in
+# whole hours, the wrapper's CLI) and the absolute path to the wrapper.
+CREST_DEFAULTS: dict[str, Any] = {
+    "walltime_hours": 24,
+    "script_path": "/storage/brno2/home/krupickm/bin/sub_crest.sh",
+}
+
 REQUIRED_ATOM_ROLES: tuple[str, ...] = (
     "spiro_carbon",
     "chromene_oxygen",
@@ -47,6 +55,8 @@ def load_config(path: Path) -> dict[str, Any]:
     data["mm"] = {**MM_DEFAULTS, **mm}
     ensemble = data.get("ensemble") or {}
     data["ensemble"] = {**ENSEMBLE_DEFAULTS, **ensemble}
+    crest = data.get("crest") or {}
+    data["crest"] = {**CREST_DEFAULTS, **crest}
     return data
 
 
