@@ -7,11 +7,26 @@ from pathlib import Path
 from typing import Sequence
 
 from spiropyran_dr.config_utils import load_config
+from spiropyran_dr.io_utils import atomic_write_json
 from spiropyran_dr.stages import crest_stage, mm, prep, xtb_stage
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_ROOT / "config" / "default.yaml"
 DEFAULT_SMARTS = PACKAGE_ROOT / "config" / "smarts.yaml"
+
+
+def _manifest_path(workspace: Path) -> Path:
+    return workspace / "manifest.json"
+
+
+def _load_manifest(workspace: Path) -> dict:
+    path = _manifest_path(workspace)
+    with path.open(encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _save_manifest(workspace: Path, manifest: dict) -> None:
+    atomic_write_json(_manifest_path(workspace), manifest)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -133,6 +148,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit the full submit() return dict as JSON on stdout.",
     )
 
+    p_collect = sub.add_parser(
+        "xtb_collect",
+        help="Parse xtb_constr outputs into manifest.json. Run after the two "
+        "xtb_constr PBS jobs have finished on the cluster.",
+    )
+    p_collect.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("./run_scratch"),
+        help="Workspace directory containing manifest.json and xtb_constr outputs.",
+    )
+    p_collect.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Path to pipeline config YAML.",
+    )
+    p_collect.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full collect() return dict as JSON on stdout.",
+    )
+
     p_crest = sub.add_parser(
         "crest",
         help="Submit CREST (stage 4) assuming xtb_constr is already done. "
@@ -163,9 +202,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def _run_prep(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     config.setdefault("paths", {})["smarts"] = str(args.smarts)
-    manifest = {"smiles_input": args.smiles}
+    manifest: dict = {"smiles_input": args.smiles, "stages": {}}
     args.workspace.mkdir(parents=True, exist_ok=True)
     result = prep.submit(manifest, args.workspace, config)
+    manifest["stages"]["prep"] = result
+    _save_manifest(args.workspace, manifest)
 
     if args.as_json:
         json.dump(result, sys.stdout, indent=2, sort_keys=True)
@@ -201,6 +242,7 @@ def _run_mm(args: argparse.Namespace) -> int:
     prep_result = prep.submit(manifest, args.workspace, config)
     manifest["stages"]["prep"] = prep_result
     if prep_result["status"] != "done":
+        _save_manifest(args.workspace, manifest)
         if args.as_json:
             json.dump(prep_result, sys.stdout, indent=2, sort_keys=True)
             sys.stdout.write("\n")
@@ -213,6 +255,8 @@ def _run_mm(args: argparse.Namespace) -> int:
         return 1
 
     result = mm.submit(manifest, args.workspace, config)
+    manifest["stages"]["mm"] = result
+    _save_manifest(args.workspace, manifest)
 
     if args.as_json:
         json.dump(result, sys.stdout, indent=2, sort_keys=True)
@@ -248,6 +292,7 @@ def _run_xtb_constr(args: argparse.Namespace) -> int:
     prep_result = prep.submit(manifest, args.workspace, config)
     manifest["stages"]["prep"] = prep_result
     if prep_result["status"] != "done":
+        _save_manifest(args.workspace, manifest)
         if args.as_json:
             json.dump(prep_result, sys.stdout, indent=2, sort_keys=True)
             sys.stdout.write("\n")
@@ -262,6 +307,7 @@ def _run_xtb_constr(args: argparse.Namespace) -> int:
     mm_result = mm.submit(manifest, args.workspace, config)
     manifest["stages"]["mm"] = mm_result
     if mm_result["status"] != "done":
+        _save_manifest(args.workspace, manifest)
         if args.as_json:
             json.dump(mm_result, sys.stdout, indent=2, sort_keys=True)
             sys.stdout.write("\n")
@@ -274,6 +320,8 @@ def _run_xtb_constr(args: argparse.Namespace) -> int:
         return 1
 
     result = xtb_stage.submit(manifest, args.workspace, config)
+    manifest["stages"]["xtb_constr"] = result
+    _save_manifest(args.workspace, manifest)
 
     if args.as_json:
         json.dump(result, sys.stdout, indent=2, sort_keys=True)
@@ -293,9 +341,8 @@ def _run_xtb_constr(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "submitted" else 1
 
 
-def _run_crest_resume(args: argparse.Namespace) -> int:
-    manifest_path = args.workspace / "manifest.json"
-    if not manifest_path.is_file():
+def _run_xtb_collect(args: argparse.Namespace) -> int:
+    if not _manifest_path(args.workspace).is_file():
         print("status: failed", file=sys.stderr)
         print(
             f"reason: manifest.json not found in {args.workspace}; "
@@ -304,8 +351,66 @@ def _run_crest_resume(args: argparse.Namespace) -> int:
         )
         return 1
 
-    with manifest_path.open(encoding="utf-8") as fh:
-        manifest = json.load(fh)
+    manifest = _load_manifest(args.workspace)
+    stages = manifest.setdefault("stages", {})
+    xtb_block = stages.get("xtb_constr") or {}
+    xtb_status = xtb_block.get("status")
+    if xtb_status not in ("submitted", "done"):
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: xtb_constr stage is {xtb_status!r}, must be 'submitted' "
+            "or 'done' before xtb_collect",
+            file=sys.stderr,
+        )
+        return 1
+
+    config = load_config(args.config)
+    result = xtb_stage.collect(manifest, args.workspace, config)
+    xtb_block.update(result)
+    stages["xtb_constr"] = xtb_block
+    _save_manifest(args.workspace, manifest)
+
+    if args.as_json:
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        if result["status"] == "done":
+            target = float(config["mecp"]["c_o_distance_angstrom"])
+            print("status: done")
+            print(f"target C-O distance: {target:.4f} Ang")
+            print(
+                f"  {'label':<6}  {'energy (Eh)':>16}  "
+                f"{'C-O (Ang)':>10}  {'dev (Ang)':>10}"
+            )
+            for label in ("anti", "syn"):
+                entries = result["outputs"].get(label) or []
+                if not entries:
+                    continue
+                e = entries[0]
+                energy = float(e["energy_hartree"])
+                co = float(e["co_distance_final_ang"])
+                dev = co - target
+                print(f"  {label:<6}  {energy:>16.8f}  {co:>10.4f}  {dev:>+10.4f}")
+        else:
+            print("status: failed", file=sys.stderr)
+            print(
+                f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr
+            )
+
+    return 0 if result["status"] == "done" else 1
+
+
+def _run_crest_resume(args: argparse.Namespace) -> int:
+    if not _manifest_path(args.workspace).is_file():
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: manifest.json not found in {args.workspace}; "
+            "run xtb_constr first",
+            file=sys.stderr,
+        )
+        return 1
+
+    manifest = _load_manifest(args.workspace)
 
     xtb_status = (manifest.get("stages") or {}).get("xtb_constr", {}).get("status")
     if xtb_status != "done":
@@ -346,6 +451,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_mm(args)
     if args.command == "xtb_constr":
         return _run_xtb_constr(args)
+    if args.command == "xtb_collect":
+        return _run_xtb_collect(args)
     if args.command == "crest":
         return _run_crest_resume(args)
     parser.error(f"unknown command: {args.command}")

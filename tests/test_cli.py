@@ -1,11 +1,50 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from spiropyran_dr.cli import main
+
+XTB_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "xtb_constr"
+
+
+def _seed_xtb_outputs(workspace: Path) -> None:
+    """Drop fixture xtbopt.xyz / xtb.out into workspace/xtb_constr/{anti,syn}/."""
+    for label in ("anti", "syn"):
+        dest = workspace / "xtb_constr" / label
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(XTB_FIXTURES / label / "xtbopt.xyz", dest / "xtbopt.xyz")
+        shutil.copyfile(XTB_FIXTURES / label / "xtb.out", dest / "xtb.out")
+
+
+def _retarget_prep_indices_to_fixture(workspace: Path) -> None:
+    """Rewrite manifest prep indices to point at fixture atoms 0 (C) and 1 (O).
+
+    The xtb_constr fixture is a 3-atom toy XYZ. The chain that bootstraps
+    the manifest runs prep on a real chiral BIPS SMILES, so spiro_carbon_idx
+    and chromene_oxygen_idx index a much larger molecule. xtb_collect must
+    measure the C-O distance on the fixture, so we overwrite the indices to
+    match the fixture atom layout.
+    """
+    path = workspace / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["stages"]["prep"]["outputs"]["spiro_carbon_idx"] = 0
+    manifest["stages"]["prep"]["outputs"]["chromene_oxygen_idx"] = 1
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _fake_pbs_submitter(prefix: str = "pbs"):
+    counter = {"n": 0}
+
+    def fake(script, args, cwd):  # type: ignore[no-untyped-def]
+        counter["n"] += 1
+        jobid = f"{counter['n']}.{prefix}"
+        return jobid, jobid + "\n"
+
+    return fake
 
 
 def test_cli_prep_bips_succeeds(
@@ -184,3 +223,208 @@ def test_cli_prep_respects_custom_smarts_path(
         ]
     )
     assert rc == 0
+
+
+def test_cli_xtb_constr_persists_manifest_json(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from spiropyran_dr.stages import xtb_stage
+
+    monkeypatch.setattr(xtb_stage, "submit_via_script", _fake_pbs_submitter("meta-pbs"))
+
+    rc = main(
+        [
+            "xtb_constr",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "20",
+            "--seed",
+            "42",
+        ]
+    )
+    assert rc == 0, capsys.readouterr().err
+
+    manifest_path = tmp_path / "manifest.json"
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stages = manifest["stages"]
+    assert stages["prep"]["status"] == "done"
+    assert stages["mm"]["status"] == "done"
+    assert stages["xtb_constr"]["status"] == "submitted"
+    assert set(stages["xtb_constr"]["pbs_job_ids"]) == {"anti", "syn"}
+
+
+def test_cli_xtb_collect_happy_path(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from spiropyran_dr.stages import xtb_stage
+
+    monkeypatch.setattr(xtb_stage, "submit_via_script", _fake_pbs_submitter("meta-pbs"))
+
+    rc = main(
+        [
+            "xtb_constr",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "20",
+            "--seed",
+            "42",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()  # discard xtb_constr output
+
+    submit_pbs_ids = json.loads(
+        (tmp_path / "manifest.json").read_text(encoding="utf-8")
+    )["stages"]["xtb_constr"]["pbs_job_ids"]
+
+    _seed_xtb_outputs(tmp_path)
+    _retarget_prep_indices_to_fixture(tmp_path)
+
+    rc = main(["xtb_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "status: done" in captured.out
+    assert "anti" in captured.out
+    assert "syn" in captured.out
+    # Per-label numerical summary present.
+    assert "C-O (Ang)" in captured.out
+    assert "3.4020" in captured.out  # fixture distance, formatted to 4 dp
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    xtb_block = manifest["stages"]["xtb_constr"]
+    assert xtb_block["status"] == "done"
+    assert "submitted_at" in xtb_block
+    assert xtb_block["pbs_job_ids"] == submit_pbs_ids
+    for label in ("anti", "syn"):
+        entries = xtb_block["outputs"][label]
+        assert isinstance(entries, list) and len(entries) == 1
+        assert abs(entries[0]["co_distance_final_ang"] - 3.402) < 1e-6
+        assert entries[0]["energy_hartree"] < 0
+
+
+def test_cli_xtb_collect_fails_on_constraint_violation(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from spiropyran_dr.stages import xtb_stage
+
+    monkeypatch.setattr(xtb_stage, "submit_via_script", _fake_pbs_submitter("meta-pbs"))
+
+    rc = main(
+        [
+            "xtb_constr",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "20",
+            "--seed",
+            "42",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    _seed_xtb_outputs(tmp_path)
+    _retarget_prep_indices_to_fixture(tmp_path)
+    # Overwrite anti xtbopt.xyz with a clearly off-target geometry (3.55 A).
+    (tmp_path / "xtb_constr" / "anti" / "xtbopt.xyz").write_text(
+        "3\nbad geometry\nC 0.0 0.0 0.0\nO 3.55 0.0 0.0\nH 0.0 1.0 0.0\n",
+        encoding="utf-8",
+    )
+
+    rc = main(["xtb_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "tolerance" in captured.err.lower()
+
+    xtb_block = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))[
+        "stages"
+    ]["xtb_constr"]
+    assert xtb_block["status"] == "failed"
+    assert "tolerance" in xtb_block.get("failure_reason", "").lower()
+
+
+def test_cli_xtb_collect_fails_when_manifest_missing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["xtb_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+def test_cli_xtb_collect_fails_when_xtb_constr_status_pending(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest = {
+        "stages": {
+            "xtb_constr": {"status": "pending"},
+        }
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    rc = main(["xtb_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "xtb_constr" in captured.err
+    assert "pending" in captured.err
+
+
+def test_cli_chain_xtb_constr_collect_then_crest_resume_succeeds(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from spiropyran_dr.stages import crest_stage, xtb_stage
+
+    monkeypatch.setattr(xtb_stage, "submit_via_script", _fake_pbs_submitter("meta-pbs"))
+
+    rc = main(
+        [
+            "xtb_constr",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "20",
+            "--seed",
+            "42",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    _seed_xtb_outputs(tmp_path)
+    _retarget_prep_indices_to_fixture(tmp_path)
+
+    rc = main(["xtb_collect", "--workspace", str(tmp_path)])
+    assert rc == 0, capsys.readouterr().err
+    capsys.readouterr()
+
+    monkeypatch.setattr(
+        crest_stage, "submit_via_script", _fake_pbs_submitter("crest-pbs")
+    )
+
+    rc = main(["crest", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "status: submitted" in captured.out
+    for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+        assert f"{label} jobid:" in captured.out
