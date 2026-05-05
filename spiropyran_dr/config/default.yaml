@@ -1,10 +1,21 @@
 # Default pipeline configuration.
-# Only the sections needed by stages currently implemented are present.
-# Other sections (mecp, dft, crest, ...) will be added as their stages land.
+# Only the sections needed by stages currently implemented (or being
+# implemented in the same change set) are present. Other sections (dft, ...)
+# will be added as their stages land.
 
 filtering:
   smarts_required: []
   smarts_forbidden: []
+
+# MECP-mimetic constraint. The C-O bond distance is fixed at the literature
+# MECP value (Prager 2014, Balint & Bende ChemPhotoChem 2026) for both the
+# pre-CREST constrained xTB seed-opt (xtb_constr stage) and the constrained
+# CREST run on the resulting seed (crest stage, _mecp branch).
+# - c_o_distance_angstrom: target distance written into the $constrain block.
+# - constraint_force_constant: $constrain "force constant=" value (xtb units).
+mecp:
+  c_o_distance_angstrom: 3.4
+  constraint_force_constant: 1.0
 
 # Stage 2 (MM) knobs. Defaults match project.md section 10.2 ("N ~50").
 # - n_embed: ETKDGv3 conformer attempts. Higher = better diastereomer
@@ -23,12 +34,38 @@ ensemble:
   energy_window_kj_mol: 20.0      # discard conformers above this from Boltzmann avg (used by aggregate stage)
   max_conformers_per_diastereomer: 20
 
-# Stage 3 (CREST) submission. CREST is run via the user-maintained
+# Stage 3 (xtb_constr) submission. Pre-CREST constrained xTB optimisation that
+# produces one MECP-mimic seed geometry per diastereomer for the constrained
+# CREST branch. Submitted via the user-maintained `sub_xtb.sh` wrapper:
+#   sub_xtb.sh <walltime_hours> <coord.xyz> <other-xtb-args>...
+# xTB always runs on 1 CPU on MetaCentrum; this is owned by sub_xtb.sh.
+# The orchestrator's pass-through args are:
+#   --opt --gfn 2 --input xtb.inp
+# where xtb.inp contains the $constrain block (force constant + distance from
+# the `mecp` section above; atom indices = prep indices + 1).
+# - walltime_hours: integer hours, 1st positional arg to the wrapper.
+# - script_path: absolute path to the wrapper on the cluster.
+# - method: currently only "gfn2" is supported (mapped to `--gfn 2`).
+# - co_distance_tolerance_angstrom: collect() rejects if the final C-O
+#   distance is farther than this from mecp.c_o_distance_angstrom.
+xtb_constr:
+  walltime_hours: 1
+  script_path: "/storage/brno2/home/krupickm/bin/sub_xtb.sh"
+  method: gfn2
+  co_distance_tolerance_angstrom: 0.01
+
+# Stage 4 (CREST) submission. CREST is run via the user-maintained
 # `sub_crest.sh` wrapper, which writes its own PBS file and qsub's it.
-# That wrapper hardcodes NPROC=7 (experimentally optimal on MetaCentrum)
-# and the orchestrator passes no CREST flags -- we trust the wrapper plus
-# CREST defaults (GFN2 search, ewin = 6 kcal/mol).
-# - walltime_hours: integer hours, passed as the wrapper's first positional arg.
+# That wrapper hardcodes NPROC=7 (experimentally optimal on MetaCentrum).
+# Four jobs run in parallel, keyed by label:
+#   - {anti,syn}_min : the orchestrator passes no CREST flags. The job
+#     trusts the wrapper plus CREST defaults (GFN2 search,
+#     ewin = 6 kcal/mol).
+#   - {anti,syn}_mecp: the orchestrator additionally writes a `.xcontrol`
+#     file in the per-label work directory and appends `--cinp .xcontrol`
+#     to the wrapper args, so the conformational search runs under the
+#     C-O distance constraint defined in the `mecp` section above.
+# - walltime_hours: integer hours, 1st positional arg to the wrapper.
 # - script_path: absolute path to the wrapper on the cluster.
 crest:
   walltime_hours: 24

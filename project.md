@@ -27,15 +27,26 @@ ChemPhotoChem 2026), and the rest of the geometry is relaxed on the ground-state
 surface with implicit solvation. The energy difference between the two diastereomeric
 constrained geometries is taken as the proxy for ΔΔG‡.
 
-The pipeline produces **two numbers**, both reported:
+The pipeline computes the d.r. along **two prediction pathways**, both reported,
+because each one carries different information:
 
-- **ΔΔE‡** — electronic energy difference at the constrained geometry (always computed)
+- **MECP / kinetic** (primary): ΔΔ between the constrained `{anti_mecp, syn_mecp}`
+  ensembles — the TS-mimetic numbers. This is the pipeline's headline d.r.
+- **Ground-state / thermodynamic** (secondary): ΔΔ between the unconstrained
+  `{anti_min, syn_min}` ensembles — reported alongside for cross-checks and
+  downstream descriptor work, but is *not* a substitute for the MECP number
+  (the closed-form energy landscape is too flat to give a reliable d.r. on
+  its own — see opening paragraph).
+
+For each pathway the pipeline produces **two numbers**, both reported:
+
+- **ΔΔE‡** — electronic energy difference at the relevant geometry (always computed)
 - **ΔΔG‡** — Gibbs free energy difference including thermal corrections from
-  vibrational frequencies at the constrained geometry (optional stage)
+  vibrational frequencies at the relevant geometry (optional stage)
 
 And **two ensemble treatments**, both reported:
 
-- **Lowest-energy conformer** per diastereomer (primary number)
+- **Lowest-energy conformer** per label (primary within the pathway)
 - **Boltzmann-weighted average** over the surviving conformer ensemble (secondary)
 
 The d.r. is computed from each ΔΔ value via:
@@ -59,20 +70,38 @@ SMILES (one molecule)
 [2] mm              local      RDKit ETKDG + MMFF, N conformers per diastereomer,
                                geometric anti/syn labelling
     ▼
-[3] crest           PBS        GFN2-xTB conformational sampling on closed ground
-                               state, per diastereomer; count-capped ensemble
+[3] xtb_constr      PBS        TS-mimetic seed: GFN2-xTB constrained opt with
+                               C-O distance fixed at the MECP value. Two jobs
+                               (one per diastereomer); each produces a single
+                               MECP-mimic seed geometry that is later fed to
+                               the constrained CREST branch.
     ▼
-[4] xtb_constr      PBS        TS-mimetic: GFN2-xTB constrained opt with C-O
-                               distance fixed at MECP value, per conformer
+[4] crest           PBS        Four parallel jobs:
+                                 - {anti,syn}_min : unconstrained GFN2-xTB
+                                   conformational sampling on the closed
+                                   ground state, seeded from the lowest MM
+                                   conformer.
+                                 - {anti,syn}_mecp: GFN2-xTB conformational
+                                   sampling under the C-O distance constraint,
+                                   seeded from the xtb_constr output. The
+                                   constraint is enforced via .xcontrol passed
+                                   through sub_crest.sh as `--cinp .xcontrol`.
     ▼
 [5] dft_sp          PBS        ORCA single point: r2SCAN-3c → ωB97X-D3BJ/def2-TZVP
-                               with SMD, per constrained geometry
+                               with SMD, per surviving conformer per label
+                               (4 labels).
     ▼
-[6] dft_freq        PBS        OPTIONAL: ORCA frequency calc at constrained
-                               geometry → thermal corrections → G(298 K)
+[6] dft_freq        PBS        OPTIONAL: ORCA frequency calc at the (constrained
+                               or unconstrained) CREST geometry → thermal
+                               corrections → G(298 K), per surviving conformer
+                               per label.
     ▼
 [7] aggregate       local      Collapse conformer ensemble (lowest + Boltzmann)
-                               per diastereomer, compute ΔΔE‡ / ΔΔG‡, report d.r.
+                               per label. Compute ΔΔE‡/ΔΔG‡ and d.r. twice:
+                               primary from the {anti_mecp, syn_mecp} ensembles
+                               (kinetic, MECP-mimetic), secondary from the
+                               {anti_min, syn_min} ensembles (thermodynamic,
+                               ground-state).
 ```
 
 Stages 1, 2, 7 are local Python (run inside the orchestrator process).
@@ -112,12 +141,19 @@ indicator. After detecting finish, parse outputs and decide success vs
 failure by inspecting the stage's natural success signal. Per-stage
 sentinels:
 
-- **crest**: presence of *both* `crest_conformers.xyz` and `crest.energies`
-  in the work directory. CREST writes them only on a clean exit; absence
-  of either => failure. No separate `crest_done` flag file.
-- **xtb_constr**: `xtbopt.xyz` present and the C-O distance constraint
-  satisfied within tolerance.
-- **dft_sp / dft_freq**: `ORCA TERMINATED NORMALLY` string in `orca.out`.
+- **xtb_constr**: per base label (`anti`, `syn`): `xtbopt.xyz` present in
+  the per-label work directory, and the measured C-O distance between
+  `spiro_carbon_idx` and `chromene_oxygen_idx` within
+  `xtb_constr.co_distance_tolerance_angstrom` of
+  `mecp.c_o_distance_angstrom`. Final energy parsed from the
+  `TOTAL ENERGY ... Eh` line in `xtb.out`.
+- **crest**: per label (`anti_min`, `syn_min`, `anti_mecp`, `syn_mecp`):
+  presence of *both* `crest_conformers.xyz` and `crest.energies` in the
+  per-label work directory. CREST writes them only on a clean exit;
+  absence of either in any label => failure. No separate `crest_done`
+  flag file.
+- **dft_sp / dft_freq**: `ORCA TERMINATED NORMALLY` string in `orca.out`,
+  per conformer per label.
 
 ### 3.2 Module loading
 
@@ -142,12 +178,13 @@ def submit(manifest: dict, workspace: Path, config: dict) -> dict:
       - status: 'done' | 'submitted' | 'failed'
       - started_at: ISO timestamp (always)
       - For PBS stages: pbs_job_ids (dict[label_or_conf_id, str]),
-        submitted_at. Stages that submit a single job per diastereomer
-        (crest) key by label; stages that submit per conformer
-        (xtb_constr, dft_sp, dft_freq) key by a flat
-        '{label}/conf_{i}' string. Per-job work directories are
-        derivable from the workspace and stage conventions; they
-        are not stored in the manifest.
+        submitted_at. Stages that submit a fixed number of jobs keyed by
+        label key by that label string -- xtb_constr by base diastereomer
+        ('anti', 'syn'); crest by the four label scheme ('anti_min',
+        'syn_min', 'anti_mecp', 'syn_mecp'). Stages that submit per
+        conformer (dft_sp, dft_freq) key by a flat '{label}/conf_{i}'
+        string. Per-job work directories are derivable from the workspace
+        and stage conventions; they are not stored in the manifest.
       - For local stages: outputs (stage-specific dict), finished_at
       - For status=='failed': failure_reason (str), finished_at
     """
@@ -203,10 +240,24 @@ Single source of truth per molecule. JSON, hand-editable, lives at
                                    "label": "anti" }, "..." ],
                        "syn":  [ "..." ],
                        "sidecar_path": "mm/conformers.json" } },
-    "crest":       { "status": "running", "pbs_job_ids":
-                     { "anti": "12345.meta-pbs", "syn": "12346.meta-pbs" },
+    "xtb_constr":  { "status": "done",
+                     "pbs_job_ids":
+                       { "anti": "12300.meta-pbs", "syn": "12301.meta-pbs" },
+                     "submitted_at": "...", "finished_at": "...",
+                     "outputs":
+                       { "anti": [ { "conf_id": 0,
+                                     "xyz": "xtb_constr/anti/xtbopt.xyz",
+                                     "energy_hartree": -22.123,
+                                     "co_distance_final_ang": 3.402,
+                                     "label": "anti" } ],
+                         "syn":  [ "..." ] } },
+    "crest":       { "status": "running",
+                     "pbs_job_ids":
+                       { "anti_min":  "12345.meta-pbs",
+                         "syn_min":   "12346.meta-pbs",
+                         "anti_mecp": "12347.meta-pbs",
+                         "syn_mecp":  "12348.meta-pbs" },
                      "submitted_at": "..." },
-    "xtb_constr":  { "status": "pending" },
     "dft_sp":      { "status": "pending" },
     "dft_freq":    { "status": "skipped" },
     "aggregate":   { "status": "pending" }
@@ -228,32 +279,54 @@ Single source of truth per molecule. JSON, hand-editable, lives at
 
 ### 5.2 Conformer-level data
 
-Stages 3–6 operate per-conformer-per-diastereomer. The manifest records a list
-of conformer entries inside each stage's `outputs`:
+Stage 3 (`xtb_constr`) operates per base diastereomer (`anti`, `syn`) and
+produces a single MECP-mimic seed geometry per label. Stages 4–6 (`crest`,
+`dft_sp`, `dft_freq`) operate per surviving conformer per **label**, where
+"label" is one of the four `{anti_min, syn_min, anti_mecp, syn_mecp}` keys
+(the `_min` branches come from unconstrained CREST on the closed ground
+state; the `_mecp` branches come from constrained CREST on the
+`xtb_constr` seed). The manifest always records a list of conformer
+entries inside each stage's `outputs`, regardless of length:
 
 ```json
 "xtb_constr": {
   "status": "done",
   "outputs": {
     "anti": [
-      { "conf_id": 0, "input": "xtb_constr/anti/conf_0/input.xyz",
-        "output": "xtb_constr/anti/conf_0/xtbopt.xyz",
-        "energy_hartree": -1234.567, "co_distance_final_ang": 3.402 },
-      { "conf_id": 1, ... }
+      { "conf_id": 0,
+        "xyz": "xtb_constr/anti/xtbopt.xyz",
+        "energy_hartree": -22.123,
+        "co_distance_final_ang": 3.402,
+        "label": "anti" }
     ],
-    "syn": [ ... ]
+    "syn": [ { "conf_id": 0, "...": "..." } ]
   }
 }
 ```
 
-Even when there is one conformer, this is a list. This costs nothing now and
-saves a refactor when macrocyclic systems with multiple conformers per
-diastereomer arrive.
+```json
+"dft_sp": {
+  "status": "done",
+  "outputs": {
+    "anti_min":  [ { "conf_id": 0, "...": "..." }, { "conf_id": 1, "...": "..." } ],
+    "syn_min":   [ "..." ],
+    "anti_mecp": [ "..." ],
+    "syn_mecp":  [ "..." ]
+  }
+}
+```
+
+Even when there is one conformer (e.g. every `xtb_constr` label, or any
+label whose CREST search collapsed to a single basin) this is a list. The
+list costs nothing now and saves a refactor when macrocyclic systems with
+multiple conformers per diastereomer arrive (as well as when a future
+extension sends multiple seeds per diastereomer into `xtb_constr`).
 
 ### 5.3 Config hash
 
 `config_hash` = sha256 over the canonical-JSON serialisation of the
-chemistry-relevant config sections (`mecp`, `solvent`, `dft`, `crest`, `xtb`).
+chemistry-relevant config sections (`mecp`, `xtb_constr`, `crest`, `dft`,
+`solvent`).
 On orchestrator start, recompute and compare to the stored hash. Mismatch =>
 refuse to resume; the user must explicitly invoke a "force-rerun" mode.
 Walltime / queue settings are not part of the hash.
@@ -279,37 +352,47 @@ Walltime / queue settings are not part of the hash.
                 │   │   └── conf_{0..N}.xyz
                 │   └── syn/
                 │       └── conf_{0..M}.xyz
-                ├── crest/
+                ├── xtb_constr/
                 │   ├── anti/
-                │   │   ├── input.xyz
-                │   │   ├── CRESTJOB_input_<pid>.sh   (written by sub_crest.sh)
+                │   │   ├── input.xyz                   (copy of mm/anti/conf_0.xyz)
+                │   │   ├── xtb.inp                     ($constrain block, --input target)
+                │   │   ├── jobid
+                │   │   ├── xtbopt.xyz
+                │   │   └── xtb.out
+                │   └── syn/ ...
+                ├── crest/
+                │   ├── anti_min/
+                │   │   ├── input.xyz                   (copy of mm/anti/conf_0.xyz)
+                │   │   ├── CRESTJOB_input_<pid>.sh     (written by sub_crest.sh)
                 │   │   ├── jobid
                 │   │   ├── input.crest.log
                 │   │   ├── crest_conformers.xyz
                 │   │   ├── crest.energies
                 │   │   └── filtered/
                 │   │       └── conf_{0..K}.xyz
-                │   └── syn/ ...
-                ├── xtb_constr/
-                │   ├── anti/
-                │   │   ├── conf_0/
-                │   │   │   ├── input.xyz
-                │   │   │   ├── xtb.inp
-                │   │   │   ├── pbs.sh
-                │   │   │   ├── jobid
-                │   │   │   ├── xtbopt.xyz
-                │   │   │   └── xtb.out
-                │   │   └── conf_1/ ...
-                │   └── syn/ ...
+                │   ├── syn_min/    ...
+                │   ├── anti_mecp/
+                │   │   ├── input.xyz                   (copy of xtb_constr/anti/xtbopt.xyz)
+                │   │   ├── .xcontrol                   ($constrain block, --cinp target)
+                │   │   ├── CRESTJOB_input_<pid>.sh
+                │   │   ├── jobid
+                │   │   ├── input.crest.log
+                │   │   ├── crest_conformers.xyz
+                │   │   ├── crest.energies
+                │   │   └── filtered/
+                │   │       └── conf_{0..K}.xyz
+                │   └── syn_mecp/   ...
                 ├── dft_sp/
-                │   ├── anti/
+                │   ├── anti_min/
                 │   │   ├── conf_0/
                 │   │   │   ├── orca.inp
                 │   │   │   ├── pbs.sh
                 │   │   │   ├── jobid
                 │   │   │   └── orca.out
                 │   │   └── conf_1/ ...
-                │   └── syn/ ...
+                │   ├── syn_min/    ...
+                │   ├── anti_mecp/  ...
+                │   └── syn_mecp/   ...
                 └── dft_freq/  (optional, same layout as dft_sp)
 ```
 
@@ -330,47 +413,71 @@ which fields are echoed to stdout; the file is always complete.
   "smiles_canonical": "...",
 
   "predictions": {
-    "lowest_conformer": {
-      "delta_e_kj_mol": 3.2,
-      "dr_anti_syn_from_e": 0.78,
-      "delta_g_kj_mol": 2.9,
-      "dr_anti_syn_from_g": 0.76,
-      "selected_conf": { "anti": 4, "syn": 1 }
+    "mecp": {
+      "lowest_conformer": {
+        "delta_e_kj_mol": 3.2,
+        "dr_anti_syn_from_e": 0.78,
+        "delta_g_kj_mol": 2.9,
+        "dr_anti_syn_from_g": 0.76,
+        "selected_conf": { "anti_mecp": 4, "syn_mecp": 1 }
+      },
+      "boltzmann": {
+        "delta_e_kj_mol": 2.8,
+        "dr_anti_syn_from_e": 0.76,
+        "delta_g_kj_mol": 2.6,
+        "dr_anti_syn_from_g": 0.74,
+        "n_conformers_used": { "anti_mecp": 7, "syn_mecp": 9 }
+      }
     },
-    "boltzmann": {
-      "delta_e_kj_mol": 2.8,
-      "dr_anti_syn_from_e": 0.76,
-      "delta_g_kj_mol": 2.6,
-      "dr_anti_syn_from_g": 0.74,
-      "n_conformers_used": { "anti": 7, "syn": 9 }
+    "ground_state": {
+      "lowest_conformer": {
+        "delta_e_kj_mol": 1.1,
+        "dr_anti_syn_from_e": 0.62,
+        "delta_g_kj_mol": 0.9,
+        "dr_anti_syn_from_g": 0.59,
+        "selected_conf": { "anti_min": 0, "syn_min": 2 }
+      },
+      "boltzmann": {
+        "delta_e_kj_mol": 0.8,
+        "dr_anti_syn_from_e": 0.58,
+        "delta_g_kj_mol": 0.7,
+        "dr_anti_syn_from_g": 0.57,
+        "n_conformers_used": { "anti_min": 11, "syn_min": 12 }
+      }
     }
   },
 
   "thermal_included": true,
 
   "energies": {
-    "anti": [
-      { "conf_id": 0, "e_dft_hartree": -1234.567,
-        "g_corr_hartree": 0.0421, "g_total_hartree": -1234.525 },
-      ...
-    ],
-    "syn": [ ... ]
+    "anti_min":  [ { "conf_id": 0, "e_dft_hartree": -1234.567,
+                     "g_corr_hartree": 0.0421, "g_total_hartree": -1234.525 },
+                   "..." ],
+    "syn_min":   [ "..." ],
+    "anti_mecp": [ "..." ],
+    "syn_mecp":  [ "..." ]
   },
 
   "config_hash": "sha256:...",
   "config_path": "config/default.yaml",
   "wall_time_seconds": {
-    "crest": { "anti": 8421, "syn": 9123 },
-    "xtb_constr": 1203,
-    "dft_sp": 31200,
-    "dft_freq": 18400
+    "xtb_constr": { "anti": 35, "syn": 41 },
+    "crest":      { "anti_min":  8421, "syn_min":  9123,
+                    "anti_mecp": 7544, "syn_mecp": 8002 },
+    "dft_sp":     31200,
+    "dft_freq":   18400
   }
 }
 ```
 
-If `--no-thermal`, `predictions.*.delta_g_kj_mol` and `dr_anti_syn_from_g` are
-`null`, `thermal_included` is `false`, and `g_corr_hartree` / `g_total_hartree`
-are absent.
+The CLI's headline number (printed when `--verbose` is not set) is
+`predictions.mecp.lowest_conformer.delta_e_kj_mol` and the corresponding
+d.r. — the kinetic, lowest-conformer prediction. The ground-state
+prediction is reported alongside but is secondary.
+
+If `--no-thermal`, `predictions.{mecp,ground_state}.{lowest_conformer,boltzmann}.delta_g_kj_mol`
+and the corresponding `dr_anti_syn_from_g` are `null`, `thermal_included` is
+`false`, and `g_corr_hartree` / `g_total_hartree` are absent.
 
 ---
 
@@ -382,6 +489,7 @@ code does not decide.
 ```yaml
 mecp:
   c_o_distance_angstrom: 3.4
+  constraint_force_constant: 1.0   # xTB/CREST $constrain force constant
 
 temperature_kelvin: 298.15
 
@@ -399,14 +507,27 @@ crest:
                                     # wrapper. The wrapper hardcodes NPROC=7 (experimentally
                                     # optimal on MetaCentrum) and calls qsub itself; the
                                     # Python orchestrator does not render its own PBS script
-                                    # for CREST and does not pass any CREST flags -- it
-                                    # trusts the wrapper plus CREST defaults (GFN2 search,
-                                    # ewin = 6 kcal/mol).
+                                    # for CREST. For the {anti,syn}_min labels the
+                                    # orchestrator passes no CREST flags and trusts the
+                                    # wrapper plus CREST defaults (GFN2 search,
+                                    # ewin = 6 kcal/mol). For the {anti,syn}_mecp labels
+                                    # it additionally writes a .xcontrol file in the work
+                                    # directory and appends `--cinp .xcontrol` so the
+                                    # conformational search runs under the C-O distance
+                                    # constraint defined in the `mecp` section.
 
 xtb_constr:
-  method: gfn2
-  walltime: "4:00:00"
-  # constraint applied: distance, atoms identified by SMARTS-mapped indices
+  walltime_hours: 1                                     # int, 1st positional arg to sub_xtb.sh
+  script_path: "/storage/brno2/home/krupickm/bin/sub_xtb.sh"
+                                                        # user-maintained xTB submission wrapper.
+                                                        # Usage: sub_xtb.sh <walltime_hours>
+                                                        #        <coord.xyz> <other-xtb-args>...
+                                                        # xTB always runs on 1 CPU on MetaCentrum;
+                                                        # this is owned by sub_xtb.sh.
+  method: gfn2                                          # passed through as `--gfn 2` to xtb
+  co_distance_tolerance_angstrom: 0.01                  # collect() rejects if the final C-O
+                                                        # distance is farther than this from
+                                                        # mecp.c_o_distance_angstrom
 
 dft:
   small_basis_method: "r2SCAN-3c"
@@ -481,7 +602,8 @@ spiropyran_dr/
 tests/
 ├── conftest.py
 ├── fixtures/                # canned QC outputs (CREST, ORCA, xTB)
-│   └── crest/{anti,syn}/{crest_conformers.xyz, crest.energies}
+│   ├── xtb_constr/{anti,syn}/{xtbopt.xyz, xtb.out}
+│   └── crest/{anti_min,syn_min,anti_mecp,syn_mecp}/{crest_conformers.xyz, crest.energies}
 ├── test_io_utils.py
 ├── test_config_utils.py
 ├── test_pbs_utils.py
@@ -548,38 +670,97 @@ tests/
 - Failure modes: ETKDG fails to embed any conformer; or after labelling
   one of the two diastereomers ends up empty (log + fail).
 
-### 10.3 crest (PBS, two parallel jobs)
+### 10.3 xtb_constr (PBS, two parallel jobs — one per diastereomer)
 
-- Input: lowest-energy MM conformer per diastereomer (one xyz per submission).
-- Action: copy that conformer to `crest/{label}/input.xyz` and invoke
-  `sub_crest.sh <walltime_hours> input.xyz` from that directory. The wrapper
-  writes its own PBS script (`CRESTJOB_input_<pid>.sh`) and submits it via
-  `qsub`; we capture the qsub stdout to record the PBS job id. No CREST
-  flags are passed -- threading (NPROC=7), method (GFN2), and ewin
-  (6 kcal/mol) all come from the wrapper plus CREST defaults. NPROC=7 is
-  experimentally optimal on MetaCentrum and is owned by `sub_crest.sh`.
-- `collect`: parse `crest_conformers.xyz` (multi-frame XYZ) and
-  `crest.energies`. Take up to `ensemble.max_conformers_per_diastereomer`
-  lowest-energy conformers (no extra ewin filter; CREST already applied
-  its own). Write the survivors as `crest/{anti,syn}/filtered/conf_{i}.xyz`
-  for downstream stages.
-- Output: filtered conformer XYZ paths and CREST energies per diastereomer.
+This stage produces the MECP-mimic seed geometry that the constrained
+CREST branch (stage 4, `_mecp` labels) starts from. It runs *before* CREST,
+not after it. There is no per-CREST-conformer constrained refinement step
+in this pipeline -- the constrained ensemble comes out of constrained
+CREST (10.4) directly.
 
-### 10.4 xtb_constr (PBS, one job per conformer per diastereomer)
+- Input: lowest-energy MM conformer per diastereomer
+  (`mm/{anti,syn}/conf_0.xyz`) plus `spiro_carbon_idx` and
+  `chromene_oxygen_idx` from prep.
+- Action, per base label (`anti`, `syn`):
+  - Copy the MM conformer to `xtb_constr/{label}/input.xyz`.
+  - Write `xtb_constr/{label}/xtb.inp` containing an xtb-style
+    `$constrain` block:
+    ```
+    $constrain
+      force constant=<mecp.constraint_force_constant>
+      distance: <i>,<j>,<mecp.c_o_distance_angstrom>
+    $end
+    ```
+    where `<i>` = `spiro_carbon_idx + 1` and `<j>` = `chromene_oxygen_idx + 1`
+    (xtb uses 1-based atom indices; prep stores 0-based RDKit indices).
+  - Invoke
+    `sub_xtb.sh <xtb_constr.walltime_hours> input.xyz --opt --gfn 2 --input xtb.inp`
+    from the work directory. The wrapper takes `<walltime_hours> <coord.xyz>
+    <other-xtb-args>...` and runs xTB on 1 CPU; the orchestrator passes
+    `--opt` (geometry optimisation), `--gfn 2` (method, derived from
+    `xtb_constr.method == "gfn2"`), and `--input xtb.inp` (read the
+    constraint block) as the pass-through args.
+  - Capture the wrapper stdout to record the PBS job id.
+- `collect`, per base label:
+  - Parse `xtb_constr/{label}/xtbopt.xyz` (single frame).
+  - Parse the final energy in Hartree from the line containing
+    `TOTAL ENERGY` in `xtb_constr/{label}/xtb.out`.
+  - Measure the final C-O distance between the two constrained atoms.
+    Reject (status `failed`) if
+    `|measured - mecp.c_o_distance_angstrom| > xtb_constr.co_distance_tolerance_angstrom`.
+- Output: per base label, a one-element list (per the "conformers always
+  lists" rule in CLAUDE.md):
+  ```
+  outputs[label] = [
+    { conf_id: 0,
+      xyz: "xtb_constr/<label>/xtbopt.xyz",
+      energy_hartree: <float>,
+      co_distance_final_ang: <float>,
+      label: "<label>" }
+  ]
+  ```
 
-- Input: filtered CREST conformers.
-- Action: for each conformer, write a constrained-optimisation xTB input that
-  fixes the C–O distance at `mecp.c_o_distance_angstrom` between
-  `spiro_carbon_idx` and `chromene_oxygen_idx`. Submit one PBS job per
-  conformer (sized small; xTB is cheap).
-- `collect`: parse `xtbopt.xyz` and final energy. Verify final C–O distance
-  is within tolerance of the requested value (e.g. ±0.01 Å). Discard
-  conformers where the constraint failed.
-- Output: per-conformer optimised geometries and xTB energies.
+### 10.4 crest (PBS, four parallel jobs)
 
-### 10.5 dft_sp (PBS, one job per surviving conformer per diastereomer)
+This stage runs CREST four times in parallel, keyed by the flat label set
+`{anti_min, syn_min, anti_mecp, syn_mecp}`. The first axis (`anti` vs
+`syn`) is the diastereomer; the second axis (`_min` vs `_mecp`) is the
+seed source and constraint state.
 
-- Input: constrained-optimised geometries.
+- Input, per label:
+  - `_min`: the lowest-energy MM conformer for the matching base label
+    (`mm/{anti,syn}/conf_0.xyz`).
+  - `_mecp`: the seed geometry from `xtb_constr.outputs[<base>][0].xyz`
+    (i.e. `xtb_constr/{anti,syn}/xtbopt.xyz`).
+- Action, per label:
+  - Copy the seed to `crest/{label}/input.xyz`.
+  - For `_mecp` labels only: write `crest/{label}/.xcontrol` with the
+    same `$constrain` block as in 10.3 (force constant and distance from
+    the `mecp` config, atom indices = prep indices + 1).
+  - Invoke `sub_crest.sh <crest.walltime_hours> input.xyz` from the work
+    directory; for `_mecp` labels additionally append `--cinp .xcontrol`
+    to the wrapper args. The wrapper writes its own PBS script
+    (`CRESTJOB_input_<pid>.sh`) and submits via `qsub`; we capture stdout
+    to record the PBS job id. NPROC=7 (experimentally optimal on
+    MetaCentrum), method (GFN2), and ewin (6 kcal/mol) all come from the
+    wrapper plus CREST defaults and are owned by `sub_crest.sh`. No other
+    CREST flags are threaded from Python.
+- `collect`, per label: parse `crest_conformers.xyz` (multi-frame XYZ)
+  and `crest.energies`. Take up to
+  `ensemble.max_conformers_per_diastereomer` lowest-energy conformers (no
+  extra ewin filter; CREST already applied its own). Write survivors as
+  `crest/{label}/filtered/conf_{i}.xyz` for downstream stages.
+- Output: per label, a list of filtered conformer XYZ paths and CREST
+  energies. The `_mecp` labels' conformers carry the constraint
+  implicitly; downstream DFT does not need to re-impose it because the
+  geometries are already at the MECP-mimic distance.
+
+### 10.5 dft_sp (PBS, one job per surviving conformer per label)
+
+- Input: filtered CREST conformers from each of the four labels
+  (`anti_min`, `syn_min`, `anti_mecp`, `syn_mecp`). The `_mecp` geometries
+  carry the C-O distance constraint implicitly (set by constrained CREST);
+  the `_min` geometries are unconstrained ground-state minima.
 - Action: ORCA single-point with two-stage protocol:
   1. r2SCAN-3c (fast, sanity check)
   2. ωB97X-D3BJ / def2-TZVP with SMD on the same geometry
@@ -588,22 +769,24 @@ tests/
   energies.
 - `collect`: parse final SCF energies. Verify normal termination
   (`ORCA TERMINATED NORMALLY` in stdout).
-- Output: r2SCAN-3c and ωB97X-D3BJ electronic energies in Hartree.
+- Output: r2SCAN-3c and ωB97X-D3BJ electronic energies in Hartree, per
+  conformer, keyed by label.
 
-### 10.6 dft_freq (PBS, optional, one job per surviving conformer per diastereomer)
+### 10.6 dft_freq (PBS, optional, one job per surviving conformer per label)
 
 - Skipped unless `options.thermal == true`.
-- Input: constrained-optimised geometries.
+- Input: filtered CREST conformers from each of the four labels.
 - Action: ORCA frequency calculation at the cheap level
-  (`dft.freq_method`, default r2SCAN-3c) at the constrained geometry. The
-  geometry is *not* re-optimised before the freq calc — we want thermal
-  corrections at the constrained TS-mimic, not at a different stationary
-  point. This means imaginary frequencies are expected (the constrained
-  geometry is not a true stationary point); `dft_freq` should record but not
-  reject on imaginary frequencies, and the thermal correction is computed
-  treating low/imaginary modes via the standard quasi-harmonic
-  approximation (Truhlar / Grimme rigid-rotor harmonic with frequencies
-  below 100 cm⁻¹ raised to 100 cm⁻¹).
+  (`dft.freq_method`, default r2SCAN-3c) at the CREST geometry. The
+  geometry is *not* re-optimised before the freq calc -- we want thermal
+  corrections at the geometry the d.r. is computed from, not at a
+  different stationary point. For the `_mecp` labels this means imaginary
+  frequencies are expected (a constrained geometry is not a true
+  stationary point); for the `_min` labels they should be absent or rare.
+  `dft_freq` records but does not reject on imaginary frequencies, and
+  the thermal correction is computed treating low/imaginary modes via the
+  standard quasi-harmonic approximation (Truhlar / Grimme rigid-rotor
+  harmonic with frequencies below 100 cm⁻¹ raised to 100 cm⁻¹).
 - `collect`: parse the thermochemistry block from ORCA output. Extract
   ZPE, thermal enthalpy correction, entropy, and Gibbs free energy
   correction at `temperature_kelvin`. Record `g_corr_hartree`. Combine with
@@ -612,16 +795,32 @@ tests/
 
 ### 10.7 aggregate (local)
 
-- Input: per-conformer energies from dft_sp (and optionally dft_freq).
-- Action: for each diastereomer, compute:
-  - **Lowest-energy**: pick the conformer with the lowest E (and lowest G,
-    independently — the lowest-E and lowest-G conformer may differ).
-  - **Boltzmann**: compute Boltzmann-weighted average energy / free energy
-    over conformers within `ensemble.energy_window_kj_mol` of the minimum.
-    Boltzmann average: ⟨E⟩ = Σ Eᵢ exp(−Eᵢ/RT) / Σ exp(−Eᵢ/RT).
-  - Compute ΔΔE‡ = E_anti − E_syn (and ΔΔG‡ if thermal stage was run).
-  - d.r.(anti:syn) = exp(−ΔΔ‡ / RT) at `temperature_kelvin`.
-- Output: write `result.json` per the schema in §7.
+- Input: per-conformer energies from dft_sp (and optionally dft_freq) for
+  all four labels.
+- Action: compute the d.r. **twice** -- once from each ensemble pair --
+  and report both.
+  - **MECP / kinetic** prediction: use the `{anti_mecp, syn_mecp}`
+    ensembles. ΔΔE‡ = E(anti_mecp) − E(syn_mecp); ΔΔG‡ analogous when
+    thermal data is present. This is the primary number; it is the
+    pipeline's headline d.r. and is printed by the CLI when `--verbose`
+    is not set.
+  - **Ground-state / thermodynamic** prediction: use the
+    `{anti_min, syn_min}` ensembles. ΔΔE = E(anti_min) − E(syn_min);
+    ΔΔG analogous. Reported alongside the MECP prediction; intended for
+    cross-checks and downstream descriptor work, not as a substitute for
+    the MECP prediction (the ground-state energy landscape is too flat
+    to give a reliable d.r. on its own -- see §1).
+  - For each ensemble pair, both ensemble treatments are computed:
+    - **Lowest-energy**: pick the conformer with the lowest E (and lowest
+      G, independently -- the lowest-E and lowest-G conformer may differ).
+    - **Boltzmann**: compute Boltzmann-weighted average energy / free
+      energy over conformers within `ensemble.energy_window_kj_mol` of
+      the minimum. Boltzmann average:
+      ⟨E⟩ = Σ Eᵢ exp(−Eᵢ/RT) / Σ exp(−Eᵢ/RT).
+  - In all cases:
+      d.r.(anti:syn) = exp(−ΔΔ / RT)   at `temperature_kelvin`.
+- Output: write `result.json` per the schema in §7. Both
+  `predictions.mecp` and `predictions.ground_state` are populated.
 
 ---
 
