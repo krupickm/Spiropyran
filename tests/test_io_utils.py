@@ -107,16 +107,7 @@ def test_read_xyz_multiframe_parses_three_frames(tmp_path: Path) -> None:
 
 
 def test_read_xyz_multiframe_tolerates_trailing_blank_lines(tmp_path: Path) -> None:
-    text = (
-        "1\n"
-        "x\n"
-        "He 0 0 0\n"
-        "\n"
-        "1\n"
-        "y\n"
-        "He 1 0 0\n"
-        "\n"
-    )
+    text = "1\nx\nHe 0 0 0\n\n1\ny\nHe 1 0 0\n\n"
     src = tmp_path / "blank.xyz"
     _write(src, text)
     frames = read_xyz_multiframe(src)

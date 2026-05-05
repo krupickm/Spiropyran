@@ -150,7 +150,9 @@ def _embed_and_optimise(
     """
     params = AllChem.ETKDGv3()
     params.randomSeed = seed
-    conf_ids = list(AllChem.EmbedMultipleConfs(mol_with_h, numConfs=n_embed, params=params))
+    conf_ids = list(
+        AllChem.EmbedMultipleConfs(mol_with_h, numConfs=n_embed, params=params)
+    )
     if not conf_ids:
         return []
     results = AllChem.MMFFOptimizeMoleculeConfs(mol_with_h, maxIters=mmff_iters)
@@ -233,10 +235,14 @@ def submit(
     mmff_iters = int(mm_cfg.get("mmff_max_iters", 200))
     rmsd_thresh = float(mm_cfg.get("rmsd_threshold_angstrom", 0.5))
     seed = int(mm_cfg.get("random_seed", 42))
-    max_per = int((config.get("ensemble") or {}).get("max_conformers_per_diastereomer", 20))
+    max_per = int(
+        (config.get("ensemble") or {}).get("max_conformers_per_diastereomer", 20)
+    )
 
     mol_h = Chem.AddHs(Chem.MolFromSmiles(smiles))
-    pairs = _embed_and_optimise(mol_h, n_embed=n_embed, mmff_iters=mmff_iters, seed=seed)
+    pairs = _embed_and_optimise(
+        mol_h, n_embed=n_embed, mmff_iters=mmff_iters, seed=seed
+    )
     if not pairs:
         return {
             "status": "failed",
@@ -296,9 +302,7 @@ def submit(
                 workspace / xyz_rel,
                 mol_h,
                 conf_id=cid,
-                comment=(
-                    f"label={label} conf_id={new_id} mmff_kcal_mol={energy:.6f}"
-                ),
+                comment=(f"label={label} conf_id={new_id} mmff_kcal_mol={energy:.6f}"),
             )
             outputs_per_label[label].append(
                 {

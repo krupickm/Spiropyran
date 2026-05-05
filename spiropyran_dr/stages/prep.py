@@ -47,7 +47,9 @@ def find_atom_by_smarts(mol: Chem.Mol, smarts: str, role: str) -> int:
     if len(matches) == 0:
         raise PrepError(f"no match for atom role {role!r}")
     if len(matches) > 1:
-        raise PrepError(f"ambiguous match for atom role {role!r}: {len(matches)} candidates")
+        raise PrepError(
+            f"ambiguous match for atom role {role!r}: {len(matches)} candidates"
+        )
     # Atom-role SMARTS query atom 0 by convention; downstream consumers want
     # the first matched atom (the spiro carbon for spiro_carbon, the oxygen
     # for chromene_oxygen).
@@ -250,7 +252,9 @@ def submit(
         chromene_o_idx = find_atom_by_smarts(
             mol, smarts_cfg["atom_roles"]["chromene_oxygen"], "chromene_oxygen"
         )
-        indoline_n_idx, gem_c_idx = _find_indoline_n_and_gem_c(mol, spiro_idx, smarts_cfg)
+        indoline_n_idx, gem_c_idx = _find_indoline_n_and_gem_c(
+            mol, spiro_idx, smarts_cfg
+        )
         stereo_mol, spiro_cip = assign_spiro_stereo(mol, spiro_idx)
     except PrepError as exc:
         return {
@@ -264,7 +268,9 @@ def submit(
     sidecar_abs = workspace / sidecar_rel
     atomic_write_json(
         sidecar_abs,
-        _stereocentres_payload(stereo_mol, spiro_idx, spiro_cip, indoline_n_idx, gem_c_idx),
+        _stereocentres_payload(
+            stereo_mol, spiro_idx, spiro_cip, indoline_n_idx, gem_c_idx
+        ),
     )
 
     return {

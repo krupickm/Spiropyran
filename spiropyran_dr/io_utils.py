@@ -9,9 +9,7 @@ from typing import Any
 from rdkit import Chem
 
 
-def write_xyz(
-    path: Path, mol: Chem.Mol, conf_id: int = 0, comment: str = ""
-) -> None:
+def write_xyz(path: Path, mol: Chem.Mol, conf_id: int = 0, comment: str = "") -> None:
     """Write a single conformer of an RDKit Mol as a standard XYZ file.
 
     Coordinates are taken from the conformer with id ``conf_id`` (default 0).
@@ -117,6 +115,27 @@ def write_xyz_from_arrays(
     for sym, (x, y, z) in zip(symbols, coords):
         lines.append(f"{sym} {x:.8f} {y:.8f} {z:.8f}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_xcontrol_distance_constraint(
+    path: Path,
+    atom_a_idx0: int,
+    atom_b_idx0: int,
+    distance_ang: float,
+    force_constant: float,
+) -> None:
+    """Write an xtb/CREST $constrain block fixing one distance.
+
+    Atom indices are accepted 0-based (RDKit / prep convention) and written
+    1-based (xtb/CREST convention)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        f"$constrain\n"
+        f"  force constant={force_constant}\n"
+        f"  distance: {atom_a_idx0 + 1},{atom_b_idx0 + 1},{distance_ang}\n"
+        f"$end\n"
+    )
+    path.write_text(content, encoding="utf-8")
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

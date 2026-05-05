@@ -69,5 +69,7 @@ def load_smarts(path: Path) -> dict[str, Any]:
         if required_key not in atom_roles:
             raise KeyError(f"{path}: atom_roles.{required_key} is required")
         if not isinstance(atom_roles[required_key], str):
-            raise ValueError(f"{path}: atom_roles.{required_key} must be a string SMARTS")
+            raise ValueError(
+                f"{path}: atom_roles.{required_key} must be a string SMARTS"
+            )
     return data

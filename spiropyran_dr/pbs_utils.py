@@ -43,9 +43,7 @@ def read_jobid(path: Path) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def submit_via_script(
-    script: Path, args: list[str], cwd: Path
-) -> tuple[str, str]:
+def submit_via_script(script: Path, args: list[str], cwd: Path) -> tuple[str, str]:
     """Run a submission script in `cwd`, capture stdout, return (jobid, raw_stdout).
 
     The script is expected to call ``qsub`` itself and echo the resulting

@@ -47,7 +47,9 @@ def _smarts(smarts_config_path: Path, key: str) -> str:
 
 def test_find_spiro_carbon_in_bips(bips_smiles: str, smarts_config_path: Path) -> None:
     mol = Chem.MolFromSmiles(canonicalise(bips_smiles))
-    idx = find_atom_by_smarts(mol, _smarts(smarts_config_path, "spiro_carbon"), "spiro_carbon")
+    idx = find_atom_by_smarts(
+        mol, _smarts(smarts_config_path, "spiro_carbon"), "spiro_carbon"
+    )
     atom = mol.GetAtomWithIdx(idx)
     assert atom.GetSymbol() == "C"
     assert atom.GetHybridization() == Chem.HybridizationType.SP3
@@ -57,9 +59,13 @@ def test_find_spiro_carbon_in_bips(bips_smiles: str, smarts_config_path: Path) -
     assert sum(1 for r in mol.GetRingInfo().AtomRings() if idx in r) == 2
 
 
-def test_find_chromene_oxygen_in_bips(bips_smiles: str, smarts_config_path: Path) -> None:
+def test_find_chromene_oxygen_in_bips(
+    bips_smiles: str, smarts_config_path: Path
+) -> None:
     mol = Chem.MolFromSmiles(canonicalise(bips_smiles))
-    idx = find_atom_by_smarts(mol, _smarts(smarts_config_path, "chromene_oxygen"), "chromene_oxygen")
+    idx = find_atom_by_smarts(
+        mol, _smarts(smarts_config_path, "chromene_oxygen"), "chromene_oxygen"
+    )
     atom = mol.GetAtomWithIdx(idx)
     assert atom.GetSymbol() == "O"
     spiro_idx = find_atom_by_smarts(
@@ -73,7 +79,9 @@ def test_find_spiro_carbon_in_methyl_bips(
     methyl_bips_smiles: str, smarts_config_path: Path
 ) -> None:
     mol = Chem.MolFromSmiles(canonicalise(methyl_bips_smiles))
-    idx = find_atom_by_smarts(mol, _smarts(smarts_config_path, "spiro_carbon"), "spiro_carbon")
+    idx = find_atom_by_smarts(
+        mol, _smarts(smarts_config_path, "spiro_carbon"), "spiro_carbon"
+    )
     assert mol.GetAtomWithIdx(idx).GetSymbol() == "C"
 
 
@@ -82,7 +90,9 @@ def test_find_spiro_carbon_no_match_raises(
 ) -> None:
     mol = Chem.MolFromSmiles(canonicalise(non_spiro_smiles))
     with pytest.raises(PrepError, match="spiro_carbon"):
-        find_atom_by_smarts(mol, _smarts(smarts_config_path, "spiro_carbon"), "spiro_carbon")
+        find_atom_by_smarts(
+            mol, _smarts(smarts_config_path, "spiro_carbon"), "spiro_carbon"
+        )
 
 
 def test_apply_smarts_filters_required_missing(bips_smiles: str) -> None:

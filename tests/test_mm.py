@@ -223,9 +223,7 @@ def test_cluster_by_rmsd_preserves_input_order_for_unique_confs() -> None:
 
 
 def test_is_ready_requires_prep_done(tmp_path: Path) -> None:
-    assert (
-        mm.is_ready({"stages": {"prep": {"status": "pending"}}}, tmp_path) is False
-    )
+    assert mm.is_ready({"stages": {"prep": {"status": "pending"}}}, tmp_path) is False
     assert mm.is_ready({"stages": {}}, tmp_path) is False
     manifest = {
         "stages": {

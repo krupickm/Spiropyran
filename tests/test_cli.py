@@ -100,15 +100,15 @@ def test_cli_mm_invalid_smiles_returns_failure(
     assert "failed" in captured.err.lower()
 
 
-def test_cli_crest_smoke_submits_two_pbs_jobs(
+def test_cli_xtb_constr_smoke_submits_two_pbs_jobs(
     tmp_path: Path,
     chiral_bips_smiles: str,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Subprocess is monkeypatched -- no real qsub. Verifies the CLI
-    # plumbs prep -> mm -> crest.submit and reports both jobids.
-    from spiropyran_dr.stages import crest_stage
+    # plumbs prep -> mm -> xtb_stage.submit and reports both jobids.
+    from spiropyran_dr.stages import xtb_stage
 
     counter = {"n": 0}
 
@@ -117,11 +117,11 @@ def test_cli_crest_smoke_submits_two_pbs_jobs(
         jobid = f"{2000 + counter['n']}.meta-pbs"
         return jobid, jobid + "\n"
 
-    monkeypatch.setattr(crest_stage, "submit_via_script", fake_submit)
+    monkeypatch.setattr(xtb_stage, "submit_via_script", fake_submit)
 
     rc = main(
         [
-            "crest",
+            "xtb_constr",
             chiral_bips_smiles,
             "--workspace",
             str(tmp_path),
@@ -136,8 +136,35 @@ def test_cli_crest_smoke_submits_two_pbs_jobs(
     assert "status: submitted" in captured.out
     assert "anti jobid:" in captured.out
     assert "syn jobid:" in captured.out
-    assert (tmp_path / "crest" / "anti" / "input.xyz").is_file()
-    assert (tmp_path / "crest" / "syn" / "jobid").is_file()
+    assert (tmp_path / "xtb_constr" / "anti" / "input.xyz").is_file()
+    assert (tmp_path / "xtb_constr" / "syn" / "jobid").is_file()
+
+
+def test_cli_crest_fails_without_manifest(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["crest", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+def test_cli_crest_fails_when_xtb_constr_not_done(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest = {
+        "stages": {
+            "xtb_constr": {"status": "submitted"},
+            "mm": {"status": "done", "outputs": {}},
+        }
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    rc = main(["crest", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "xtb_constr" in captured.err
 
 
 def test_cli_prep_respects_custom_smarts_path(

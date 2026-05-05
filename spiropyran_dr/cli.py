@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from spiropyran_dr.config_utils import load_config
-from spiropyran_dr.stages import crest_stage, mm, prep
+from spiropyran_dr.stages import crest_stage, mm, prep, xtb_stage
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_ROOT / "config" / "default.yaml"
@@ -90,41 +90,65 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit the full submit() return dict as JSON on stdout.",
     )
 
+    p_xtb = sub.add_parser(
+        "xtb_constr",
+        help="Run stages 1-3 (prep + MM + constrained xTB submit). Submits 2 PBS jobs "
+        "(one per diastereomer) and exits.",
+    )
+    p_xtb.add_argument("smiles", help="Input SMILES string for the closed spiropyran.")
+    p_xtb.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("./run_scratch"),
+        help="Workspace directory; xtb_constr/{anti,syn}/ are created here.",
+    )
+    p_xtb.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Path to pipeline config YAML.",
+    )
+    p_xtb.add_argument(
+        "--smarts",
+        type=Path,
+        default=DEFAULT_SMARTS,
+        help="Path to atom-role SMARTS YAML.",
+    )
+    p_xtb.add_argument(
+        "--n-embed",
+        type=int,
+        default=None,
+        help="Override mm.n_embed from config.",
+    )
+    p_xtb.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override mm.random_seed from config.",
+    )
+    p_xtb.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full submit() return dict as JSON on stdout.",
+    )
+
     p_crest = sub.add_parser(
         "crest",
-        help="Run stages 1-3 (prep + MM + CREST submit). Submits PBS jobs and "
-        "exits; collect runs separately once jobs finish.",
+        help="Submit CREST (stage 4) assuming xtb_constr is already done. "
+        "Loads manifest.json from the workspace and submits 4 PBS jobs.",
     )
-    p_crest.add_argument("smiles", help="Input SMILES string for the closed spiropyran.")
     p_crest.add_argument(
         "--workspace",
         type=Path,
         default=Path("./run_scratch"),
-        help="Workspace directory; crest/{anti,syn}/ are created here.",
+        help="Workspace directory containing manifest.json.",
     )
     p_crest.add_argument(
         "--config",
         type=Path,
         default=DEFAULT_CONFIG,
         help="Path to pipeline config YAML.",
-    )
-    p_crest.add_argument(
-        "--smarts",
-        type=Path,
-        default=DEFAULT_SMARTS,
-        help="Path to atom-role SMARTS YAML.",
-    )
-    p_crest.add_argument(
-        "--n-embed",
-        type=int,
-        default=None,
-        help="Override mm.n_embed from config.",
-    )
-    p_crest.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Override mm.random_seed from config.",
     )
     p_crest.add_argument(
         "--json",
@@ -157,7 +181,9 @@ def _run_prep(args: argparse.Namespace) -> int:
             print(f"sidecar:            {args.workspace / out['stereocentres_path']}")
         else:
             print("status: failed", file=sys.stderr)
-            print(f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+            print(
+                f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr
+            )
 
     return 0 if result["status"] == "done" else 1
 
@@ -180,7 +206,10 @@ def _run_mm(args: argparse.Namespace) -> int:
             sys.stdout.write("\n")
         else:
             print("status: failed (prep)", file=sys.stderr)
-            print(f"reason: {prep_result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+            print(
+                f"reason: {prep_result.get('failure_reason', '<unknown>')}",
+                file=sys.stderr,
+            )
         return 1
 
     result = mm.submit(manifest, args.workspace, config)
@@ -198,12 +227,14 @@ def _run_mm(args: argparse.Namespace) -> int:
             print(f"syn_xyz_dir:       {args.workspace / out['syn_xyz_dir']}")
         else:
             print("status: failed", file=sys.stderr)
-            print(f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+            print(
+                f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr
+            )
 
     return 0 if result["status"] == "done" else 1
 
 
-def _run_crest(args: argparse.Namespace) -> int:
+def _run_xtb_constr(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     config.setdefault("paths", {})["smarts"] = str(args.smarts)
     if args.n_embed is not None:
@@ -222,7 +253,10 @@ def _run_crest(args: argparse.Namespace) -> int:
             sys.stdout.write("\n")
         else:
             print("status: failed (prep)", file=sys.stderr)
-            print(f"reason: {prep_result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+            print(
+                f"reason: {prep_result.get('failure_reason', '<unknown>')}",
+                file=sys.stderr,
+            )
         return 1
 
     mm_result = mm.submit(manifest, args.workspace, config)
@@ -233,9 +267,56 @@ def _run_crest(args: argparse.Namespace) -> int:
             sys.stdout.write("\n")
         else:
             print("status: failed (mm)", file=sys.stderr)
-            print(f"reason: {mm_result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+            print(
+                f"reason: {mm_result.get('failure_reason', '<unknown>')}",
+                file=sys.stderr,
+            )
         return 1
 
+    result = xtb_stage.submit(manifest, args.workspace, config)
+
+    if args.as_json:
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        if result["status"] == "submitted":
+            print("status: submitted")
+            for label, jobid in result["pbs_job_ids"].items():
+                print(f"{label} jobid: {jobid}")
+            print(f"work_dirs: {args.workspace / 'xtb_constr'}")
+        else:
+            print("status: failed", file=sys.stderr)
+            print(
+                f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr
+            )
+
+    return 0 if result["status"] == "submitted" else 1
+
+
+def _run_crest_resume(args: argparse.Namespace) -> int:
+    manifest_path = args.workspace / "manifest.json"
+    if not manifest_path.is_file():
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: manifest.json not found in {args.workspace}; "
+            "run xtb_constr first",
+            file=sys.stderr,
+        )
+        return 1
+
+    with manifest_path.open(encoding="utf-8") as fh:
+        manifest = json.load(fh)
+
+    xtb_status = (manifest.get("stages") or {}).get("xtb_constr", {}).get("status")
+    if xtb_status != "done":
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: xtb_constr stage is {xtb_status!r}, must be 'done' before CREST",
+            file=sys.stderr,
+        )
+        return 1
+
+    config = load_config(args.config)
     result = crest_stage.submit(manifest, args.workspace, config)
 
     if args.as_json:
@@ -249,7 +330,9 @@ def _run_crest(args: argparse.Namespace) -> int:
             print(f"work_dirs: {args.workspace / 'crest'}")
         else:
             print("status: failed", file=sys.stderr)
-            print(f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+            print(
+                f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr
+            )
 
     return 0 if result["status"] == "submitted" else 1
 
@@ -261,7 +344,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_prep(args)
     if args.command == "mm":
         return _run_mm(args)
+    if args.command == "xtb_constr":
+        return _run_xtb_constr(args)
     if args.command == "crest":
-        return _run_crest(args)
+        return _run_crest_resume(args)
     parser.error(f"unknown command: {args.command}")
     return 2

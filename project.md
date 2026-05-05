@@ -585,11 +585,11 @@ spiropyran_dr/
 │   └── aggregate.py
 ├── templates/
 │   ├── pbs_orchestrator.j2
-│   ├── pbs_xtb_constrained.j2
 │   ├── pbs_orca_sp.j2
 │   └── pbs_orca_freq.j2
-│   # Note: no pbs_crest.j2. CREST submission is delegated to the
-│   # user-maintained sub_crest.sh wrapper (config: crest.script_path).
+│   # Note: no pbs_crest.j2 or pbs_xtb_constrained.j2. Both CREST and
+│   # constrained xTB submission are delegated to user-maintained wrappers
+│   # (sub_crest.sh / sub_xtb.sh). Only ORCA jobs use rendered templates.
 ├── config/
 │   ├── default.yaml
 │   └── smarts.yaml
@@ -609,6 +609,7 @@ tests/
 ├── test_pbs_utils.py
 ├── test_prep.py
 ├── test_mm.py
+├── test_xtb_stage.py
 ├── test_crest_stage.py
 ├── test_aggregate.py
 └── test_cli.py

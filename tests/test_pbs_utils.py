@@ -27,11 +27,7 @@ def test_parse_jobid_strips_whitespace() -> None:
 def test_parse_jobid_takes_last_nonblank_line() -> None:
     # sub_crest.sh prints other lines before qsub's output; the jobid is the
     # last non-blank line.
-    text = (
-        "Submitting CREST job for input.xyz\n"
-        "\n"
-        "67890.meta-pbs.metacentrum.cz\n"
-    )
+    text = "Submitting CREST job for input.xyz\n\n67890.meta-pbs.metacentrum.cz\n"
     assert parse_jobid_from_qsub_stdout(text) == "67890.meta-pbs.metacentrum.cz"
 
 
@@ -85,6 +81,4 @@ def test_submit_via_script_wraps_subprocess_error(
     monkeypatch.setattr(subprocess, "run", boom)
 
     with pytest.raises(PBSSubmitError, match="qsub"):
-        submit_via_script(
-            Path("/fake/sub_crest.sh"), ["24", "input.xyz"], cwd=tmp_path
-        )
+        submit_via_script(Path("/fake/sub_crest.sh"), ["24", "input.xyz"], cwd=tmp_path)
