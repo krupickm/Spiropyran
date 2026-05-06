@@ -30,3 +30,4 @@ spiropyran_dr = ["config/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]

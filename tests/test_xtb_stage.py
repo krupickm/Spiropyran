@@ -10,7 +10,7 @@ from spiropyran_dr.pbs_utils import PBSSubmitError
 from spiropyran_dr.stages import xtb_stage
 from spiropyran_dr.stages.base import Stage
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "xtb_constr"
+from conftest import fixture_molecule_dir, fixture_molecule_names
 
 
 # -- protocol --------------------------------------------------------------
@@ -225,15 +225,16 @@ def test_submit_marks_failed_when_script_fails(
 # -- collect ---------------------------------------------------------------
 
 
-def _seed_xtb_outputs(workspace: Path) -> None:
+def _seed_xtb_outputs(workspace: Path, molecule: str = "water_synthetic") -> None:
     """Copy fixture xtb_constr outputs into a workspace's xtb_constr/{anti,syn}/ dirs."""
+    xtb_fixture = fixture_molecule_dir(molecule) / "xtb_constr"
     for label in ("anti", "syn"):
         dest = workspace / "xtb_constr" / label
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            FIXTURES / label / "input.xtbopt.xyz", dest / "input.xtbopt.xyz"
+            xtb_fixture / label / "input.xtbopt.xyz", dest / "input.xtbopt.xyz"
         )
-        shutil.copyfile(FIXTURES / label / "input.xtb.log", dest / "input.xtb.log")
+        shutil.copyfile(xtb_fixture / label / "input.xtb.log", dest / "input.xtb.log")
 
 
 def _collect_manifest() -> dict[str, Any]:
@@ -305,3 +306,12 @@ def test_collect_outputs_single_element_list_per_label(tmp_path: Path) -> None:
         entries = result["outputs"][label]
         assert isinstance(entries, list), f"{label} outputs should be a list"
         assert len(entries) == 1, f"{label} should have exactly 1 element"
+
+
+@pytest.mark.parametrize("mol_name", fixture_molecule_names())
+def test_collect_succeeds_for_all_fixture_molecules(
+    mol_name: str, tmp_path: Path
+) -> None:
+    _seed_xtb_outputs(tmp_path, mol_name)
+    result = xtb_stage.collect(_collect_manifest(), tmp_path, _collect_config())
+    assert result["status"] == "done", result

@@ -8,36 +8,39 @@ import pytest
 
 from spiropyran_dr.cli import main
 
-XTB_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "xtb_constr"
-CREST_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "crest"
+from conftest import fixture_molecule_dir
 
 
 def _seed_crest_outputs(
-    workspace: Path, labels=("anti_min", "syn_min", "anti_mecp", "syn_mecp")
+    workspace: Path,
+    labels=("anti_min", "syn_min", "anti_mecp", "syn_mecp"),
+    molecule: str = "water_synthetic",
 ) -> None:
     """Drop fixture crest_conformers.xyz / crest.energies into workspace/crest/<label>/."""
+    crest_fixture = fixture_molecule_dir(molecule) / "crest"
     for label in labels:
         dest = workspace / "crest" / label
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            CREST_FIXTURES / label / "crest_conformers.xyz",
+            crest_fixture / label / "crest_conformers.xyz",
             dest / "crest_conformers.xyz",
         )
         shutil.copyfile(
-            CREST_FIXTURES / label / "crest.energies",
+            crest_fixture / label / "crest.energies",
             dest / "crest.energies",
         )
 
 
-def _seed_xtb_outputs(workspace: Path) -> None:
+def _seed_xtb_outputs(workspace: Path, molecule: str = "water_synthetic") -> None:
     """Drop fixture input.xtbopt.xyz / input.xtb.log into workspace/xtb_constr/{anti,syn}/."""
+    xtb_fixture = fixture_molecule_dir(molecule) / "xtb_constr"
     for label in ("anti", "syn"):
         dest = workspace / "xtb_constr" / label
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            XTB_FIXTURES / label / "input.xtbopt.xyz", dest / "input.xtbopt.xyz"
+            xtb_fixture / label / "input.xtbopt.xyz", dest / "input.xtbopt.xyz"
         )
-        shutil.copyfile(XTB_FIXTURES / label / "input.xtb.log", dest / "input.xtb.log")
+        shutil.copyfile(xtb_fixture / label / "input.xtb.log", dest / "input.xtb.log")
 
 
 def _retarget_prep_indices_to_fixture(workspace: Path) -> None:

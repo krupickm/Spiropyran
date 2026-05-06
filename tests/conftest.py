@@ -5,6 +5,22 @@ from pathlib import Path
 import pytest
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "spiropyran_dr"
+FIXTURE_MOLECULES_DIR = Path(__file__).resolve().parent / "fixtures" / "molecules"
+
+
+def fixture_molecule_dir(name: str) -> Path:
+    p = FIXTURE_MOLECULES_DIR / name
+    if not p.is_dir():
+        raise FileNotFoundError(
+            f"No fixture molecule set named {name!r} under {FIXTURE_MOLECULES_DIR}"
+        )
+    return p
+
+
+def fixture_molecule_names() -> list[str]:
+    if not FIXTURE_MOLECULES_DIR.is_dir():
+        return []
+    return sorted(d.name for d in FIXTURE_MOLECULES_DIR.iterdir() if d.is_dir())
 
 
 @pytest.fixture

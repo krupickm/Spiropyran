@@ -11,7 +11,7 @@ from spiropyran_dr.pbs_utils import PBSSubmitError
 from spiropyran_dr.stages import crest_stage
 from spiropyran_dr.stages.base import Stage
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "crest"
+from conftest import fixture_molecule_dir, fixture_molecule_names
 
 
 # -- protocol --------------------------------------------------------------
@@ -367,17 +367,18 @@ def test_submit_seeds_min_from_mm_output(
 # -- collect ---------------------------------------------------------------
 
 
-def _seed_crest_outputs(workspace: Path) -> None:
+def _seed_crest_outputs(workspace: Path, molecule: str = "water_synthetic") -> None:
     """Copy fixture CREST outputs into all 4 label directories."""
+    crest_fixture = fixture_molecule_dir(molecule) / "crest"
     for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
         dest = workspace / "crest" / label
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            FIXTURES / label / "crest_conformers.xyz",
+            crest_fixture / label / "crest_conformers.xyz",
             dest / "crest_conformers.xyz",
         )
         shutil.copyfile(
-            FIXTURES / label / "crest.energies",
+            crest_fixture / label / "crest.energies",
             dest / "crest.energies",
         )
 
@@ -426,10 +427,11 @@ def test_collect_fails_when_outputs_missing(tmp_path: Path) -> None:
     label = "anti_min"
     dest = tmp_path / "crest" / label
     dest.mkdir(parents=True, exist_ok=True)
+    crest_fixture = fixture_molecule_dir("water_synthetic") / "crest"
     shutil.copyfile(
-        FIXTURES / label / "crest_conformers.xyz", dest / "crest_conformers.xyz"
+        crest_fixture / label / "crest_conformers.xyz", dest / "crest_conformers.xyz"
     )
-    shutil.copyfile(FIXTURES / label / "crest.energies", dest / "crest.energies")
+    shutil.copyfile(crest_fixture / label / "crest.energies", dest / "crest.energies")
 
     result = crest_stage.collect({}, tmp_path, _config())
     assert result["status"] == "failed"
@@ -445,6 +447,15 @@ def test_collect_fails_on_count_mismatch(tmp_path: Path) -> None:
     result = crest_stage.collect({}, tmp_path, _config())
     assert result["status"] == "failed"
     assert "mismatch" in result["failure_reason"].lower()
+
+
+@pytest.mark.parametrize("mol_name", fixture_molecule_names())
+def test_collect_succeeds_for_all_fixture_molecules(
+    mol_name: str, tmp_path: Path
+) -> None:
+    _seed_crest_outputs(tmp_path, mol_name)
+    result = crest_stage.collect({}, tmp_path, _config())
+    assert result["status"] == "done", result
 
 
 # -- pbs_utils integration sanity -----------------------------------------

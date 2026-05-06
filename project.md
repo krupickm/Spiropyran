@@ -605,10 +605,15 @@ spiropyran_dr/
 
 # Tests live at the repo root, alongside spiropyran_dr/, not inside it:
 tests/
-├── conftest.py
-├── fixtures/                # canned QC outputs (CREST, ORCA, xTB)
-│   ├── xtb_constr/{anti,syn}/{input.xtbopt.xyz, input.xtb.log}
-│   └── crest/{anti_min,syn_min,anti_mecp,syn_mecp}/{crest_conformers.xyz, crest.energies}
+├── conftest.py              # shared helpers: fixture_molecule_dir(), fixture_molecule_names()
+├── fixtures/
+│   └── molecules/           # one subdirectory per named molecule set
+│       ├── water_synthetic/ # built-in synthetic data (3-atom toy, always present)
+│       │   ├── crest/{anti_min,syn_min,anti_mecp,syn_mecp}/{crest_conformers.xyz,crest.energies}
+│       │   └── xtb_constr/{anti,syn}/{input.xtbopt.xyz,input.xtb.log}
+│       └── <name>/          # real cluster output dropped in by the developer (see below)
+│           ├── crest/...
+│           └── xtb_constr/...
 ├── test_io_utils.py
 ├── test_config_utils.py
 ├── test_pbs_utils.py
@@ -619,6 +624,43 @@ tests/
 ├── test_aggregate.py
 └── test_cli.py
 ```
+
+### Adding a real-molecule fixture set
+
+Each subdirectory of `tests/fixtures/molecules/` is an independent fixture set.
+The `water_synthetic` set uses hand-crafted 3-atom geometries; it exists to give
+fast, always-passing baseline coverage. Real cluster output should be added as a
+separate named set (e.g. `sp1_bips`, `sp2_nitro`).
+
+**Required files per set** (copy directly from the cluster; do not reformat):
+
+```
+<name>/
+├── crest/
+│   ├── anti_min/
+│   │   ├── crest_conformers.xyz   # multi-frame XYZ from CREST
+│   │   └── crest.energies         # one energy per conformer (idx E or E format)
+│   ├── syn_min/   (same)
+│   ├── anti_mecp/ (same)
+│   └── syn_mecp/  (same)
+└── xtb_constr/
+    ├── anti/
+    │   ├── input.xtbopt.xyz       # final geometry from constrained xTB opt
+    │   └── input.xtb.log          # full xTB stdout log
+    └── syn/ (same)
+```
+
+**Trimming large outputs:** CREST can produce hundreds of conformers. Keep the
+file format byte-for-byte identical to what the cluster wrote, but truncate
+`crest_conformers.xyz` to 5–10 frames and remove the matching trailing lines
+from `crest.energies` so the counts stay consistent. Do not alter spacing,
+scientific notation, or the comment line format.
+
+**Registration is automatic:** `fixture_molecule_names()` in `conftest.py`
+scans `tests/fixtures/molecules/` at import time. Any new subdirectory is
+immediately picked up by the `test_collect_succeeds_for_all_fixture_molecules`
+parametrized smoke tests in `test_crest_stage.py` and `test_xtb_stage.py`.
+No other code changes are required.
 
 ---
 
