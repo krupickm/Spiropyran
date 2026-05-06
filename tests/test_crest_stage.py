@@ -128,9 +128,7 @@ def _seed_xtb_constr_outputs(workspace: Path) -> None:
     for label in ("anti", "syn"):
         d = workspace / "xtb_constr" / label
         d.mkdir(parents=True, exist_ok=True)
-        (d / "input.xtbopt.xyz").write_text(
-            "1\nxtb seed\nC 0 0 0\n", encoding="utf-8"
-        )
+        (d / "input.xtbopt.xyz").write_text("1\nxtb seed\nC 0 0 0\n", encoding="utf-8")
 
 
 def _full_manifest(workspace: Path) -> dict[str, Any]:

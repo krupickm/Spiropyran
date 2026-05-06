@@ -9,6 +9,24 @@ import pytest
 from spiropyran_dr.cli import main
 
 XTB_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "xtb_constr"
+CREST_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "crest"
+
+
+def _seed_crest_outputs(
+    workspace: Path, labels=("anti_min", "syn_min", "anti_mecp", "syn_mecp")
+) -> None:
+    """Drop fixture crest_conformers.xyz / crest.energies into workspace/crest/<label>/."""
+    for label in labels:
+        dest = workspace / "crest" / label
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            CREST_FIXTURES / label / "crest_conformers.xyz",
+            dest / "crest_conformers.xyz",
+        )
+        shutil.copyfile(
+            CREST_FIXTURES / label / "crest.energies",
+            dest / "crest.energies",
+        )
 
 
 def _seed_xtb_outputs(workspace: Path) -> None:
@@ -19,9 +37,7 @@ def _seed_xtb_outputs(workspace: Path) -> None:
         shutil.copyfile(
             XTB_FIXTURES / label / "input.xtbopt.xyz", dest / "input.xtbopt.xyz"
         )
-        shutil.copyfile(
-            XTB_FIXTURES / label / "input.xtb.log", dest / "input.xtb.log"
-        )
+        shutil.copyfile(XTB_FIXTURES / label / "input.xtb.log", dest / "input.xtb.log")
 
 
 def _retarget_prep_indices_to_fixture(workspace: Path) -> None:
@@ -432,3 +448,137 @@ def test_cli_chain_xtb_constr_collect_then_crest_resume_succeeds(
     assert "status: submitted" in captured.out
     for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
         assert f"{label} jobid:" in captured.out
+
+    crest_block = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))[
+        "stages"
+    ]["crest"]
+    assert crest_block["status"] == "submitted"
+    assert set(crest_block["pbs_job_ids"]) == {
+        "anti_min",
+        "syn_min",
+        "anti_mecp",
+        "syn_mecp",
+    }
+
+
+def test_cli_crest_collect_fails_when_manifest_missing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["crest_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+def test_cli_crest_collect_fails_when_crest_status_pending(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest = {"stages": {"crest": {"status": "pending"}}}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    rc = main(["crest_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "crest" in captured.err
+    assert "pending" in captured.err
+
+
+def _chain_through_crest_submit(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run prep -> mm -> xtb_constr -> xtb_collect -> crest with mocked PBS."""
+    from spiropyran_dr.stages import crest_stage, xtb_stage
+
+    monkeypatch.setattr(xtb_stage, "submit_via_script", _fake_pbs_submitter("meta-pbs"))
+
+    rc = main(
+        [
+            "xtb_constr",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "20",
+            "--seed",
+            "42",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    _seed_xtb_outputs(tmp_path)
+    _retarget_prep_indices_to_fixture(tmp_path)
+
+    rc = main(["xtb_collect", "--workspace", str(tmp_path)])
+    assert rc == 0, capsys.readouterr().err
+    capsys.readouterr()
+
+    monkeypatch.setattr(
+        crest_stage, "submit_via_script", _fake_pbs_submitter("crest-pbs")
+    )
+    rc = main(["crest", "--workspace", str(tmp_path)])
+    assert rc == 0, capsys.readouterr().err
+    capsys.readouterr()
+
+
+def test_cli_crest_collect_happy_path(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _chain_through_crest_submit(tmp_path, chiral_bips_smiles, monkeypatch, capsys)
+    submit_pbs_ids = json.loads(
+        (tmp_path / "manifest.json").read_text(encoding="utf-8")
+    )["stages"]["crest"]["pbs_job_ids"]
+
+    _seed_crest_outputs(tmp_path)
+
+    rc = main(["crest_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "status: done" in captured.out
+    for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+        assert label in captured.out
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    crest_block = manifest["stages"]["crest"]
+    assert crest_block["status"] == "done"
+    # pre-existing pbs_job_ids survive the merge
+    assert crest_block["pbs_job_ids"] == submit_pbs_ids
+    outputs = crest_block["outputs"]
+    for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+        entries = outputs[label]
+        assert isinstance(entries, list) and len(entries) >= 1
+        assert outputs[f"n_conformers_{label}"] == len(entries)
+        assert outputs[f"{label}_xyz_dir"] == f"crest/{label}/filtered"
+        for i, e in enumerate(entries):
+            assert e["conf_id"] == i
+            assert e["label"] == label
+
+
+def test_cli_crest_collect_fails_on_missing_outputs(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _chain_through_crest_submit(tmp_path, chiral_bips_smiles, monkeypatch, capsys)
+    # Seed only one of the four label dirs.
+    _seed_crest_outputs(tmp_path, labels=("anti_min",))
+
+    rc = main(["crest_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "failed" in captured.err.lower()
+
+    crest_block = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))[
+        "stages"
+    ]["crest"]
+    assert crest_block["status"] == "failed"
+    assert "failure_reason" in crest_block

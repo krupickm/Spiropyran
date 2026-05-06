@@ -857,6 +857,29 @@ predict_dr.py resume <workspace>/<molecule_id>
 The OVEN orchestrator PBS script (`pbs_orchestrator.j2`) just calls
 `predict_dr.py predict ...` (or `resume` on retry).
 
+### 11.1 Incremental per-stage CLI surface
+
+While the full orchestrator loop is being built, the CLI also exposes the
+individual stages so each can be driven by hand from a developer laptop or
+a login node. These are not part of the v1 user-facing surface but are
+required for testing and for the `submit -> wait on cluster -> collect`
+manual workflow.
+
+```
+predict_dr.py prep         <SMILES> --workspace PATH
+predict_dr.py mm           <SMILES> --workspace PATH
+predict_dr.py xtb_constr   <SMILES> --workspace PATH    # prep+mm+submit 2 PBS
+predict_dr.py xtb_collect           --workspace PATH    # parse xtb outputs
+predict_dr.py crest                 --workspace PATH    # submit 4 PBS
+predict_dr.py crest_collect         --workspace PATH    # parse crest outputs
+```
+
+Each `*_collect` command reads `manifest.json`, requires the upstream
+stage's status to be `submitted` or `done`, parses the per-label output
+files written by the cluster, and merges the result into the stage block
+(preserving `pbs_job_ids`, `submitted_at`, etc.). The submit commands
+write `manifest.json` so subsequent collect commands can pick it up.
+
 ---
 
 ## 12. Failure handling
