@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from spiropyran_dr.io_utils import (
-    read_crest_energies,
+    parse_crest_energy_from_comment,
     read_xyz_multiframe,
     write_xcontrol_distance_constraint,
     write_xyz_from_arrays,
@@ -191,29 +191,18 @@ def collect(
     for label in LABELS:
         work_dir = _label_dir(workspace, label)
         confs_path = work_dir / "crest_conformers.xyz"
-        energies_path = work_dir / "crest.energies"
-        if not confs_path.is_file() or not energies_path.is_file():
+        if not confs_path.is_file():
             return {
                 "status": "failed",
                 "finished_at": _now_iso(),
-                "failure_reason": (
-                    f"CREST output missing for {label}: "
-                    f"have {confs_path.exists()}/{energies_path.exists()} "
-                    f"for (conformers.xyz / energies)"
-                ),
+                "failure_reason": f"CREST output missing for {label}: {confs_path}",
             }
 
+        # CREST emits crest_conformers.xyz already sorted lowest-first, with the
+        # absolute electronic energy (Hartree) as the first token of each frame's
+        # comment line. The sibling crest.energies file holds only relative
+        # energies (kcal/mol) and is intentionally not consulted.
         frames = read_xyz_multiframe(confs_path)
-        energies = read_crest_energies(energies_path)
-        if len(frames) != len(energies):
-            return {
-                "status": "failed",
-                "finished_at": _now_iso(),
-                "failure_reason": (
-                    f"frame/energy count mismatch for {label}: "
-                    f"{len(frames)} frames vs {len(energies)} energies"
-                ),
-            }
         if not frames:
             return {
                 "status": "failed",
@@ -221,19 +210,32 @@ def collect(
                 "failure_reason": f"CREST produced no conformers for {label}",
             }
 
-        order = sorted(range(len(energies)), key=lambda k: energies[k])
-        kept = order[:max_per]
+        try:
+            energies_hartree = [
+                parse_crest_energy_from_comment(comment) for _, _, comment in frames
+            ]
+        except ValueError as exc:
+            return {
+                "status": "failed",
+                "finished_at": _now_iso(),
+                "failure_reason": (
+                    f"could not parse absolute energy from a frame comment "
+                    f"in {confs_path}: {exc}"
+                ),
+            }
+
+        kept = list(range(min(max_per, len(frames))))
 
         filtered_dir = work_dir / "filtered"
         filtered_dir.mkdir(parents=True, exist_ok=True)
-        e_min = energies[kept[0]]
+        e_min = energies_hartree[0]
         label_entries: list[dict[str, Any]] = []
         for new_id, frame_idx in enumerate(kept):
             symbols, coords, _ = frames[frame_idx]
+            energy = energies_hartree[frame_idx]
             xyz_rel = Path("crest") / label / "filtered" / f"conf_{new_id}.xyz"
             comment = (
-                f"label={label} conf_id={new_id} "
-                f"crest_energy_hartree={energies[frame_idx]:.8f}"
+                f"label={label} conf_id={new_id} crest_energy_hartree={energy:.8f}"
             )
             write_xyz_from_arrays(workspace / xyz_rel, symbols, coords, comment)
             label_entries.append(
@@ -241,11 +243,9 @@ def collect(
                     "conf_id": new_id,
                     "source_frame": frame_idx,
                     "xyz": str(xyz_rel).replace("\\", "/"),
-                    "energy_hartree": energies[frame_idx],
+                    "energy_hartree": energy,
                     # 627.5094740631 kcal/mol per Hartree (CODATA)
-                    "relative_energy_kcal_mol": (
-                        (energies[frame_idx] - e_min) * 627.5094740631
-                    ),
+                    "relative_energy_kcal_mol": (energy - e_min) * 627.5094740631,
                     "label": label,
                 }
             )

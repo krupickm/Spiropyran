@@ -9,8 +9,8 @@ You inspect quantum-chemistry output files and report structured findings.
 
 ## Common files
 - **ORCA `.out`** — single-point or optimisation output. Look for `FINAL SINGLE POINT ENERGY`, convergence flags, error messages near the end.
-- **CREST `crest_conformers.xyz`** — multi-structure XYZ, energies in comment lines.
-- **CREST `crest.energies`** — energy table, one line per conformer.
+- **CREST `crest_conformers.xyz`** — multi-structure XYZ; the absolute Hartree energy is the first whitespace token of each frame's comment line. This is the file the pipeline reads.
+- **CREST `crest.energies`** — relative energies (kcal/mol) only; not consumed by the pipeline.
 - **xTB `input.xtb.log` / `input.xtbopt.xyz`** — wrapper stdout (parse `TOTAL ENERGY`) and final geometry. `sub_xtb.sh` runs xtb with `--namespace input`, so output filenames are prefixed with the basename of the input geometry.
 - **Multiwfn output** — text tables of charges, ESP statistics, polarisability.
 - **PBS `.o<jobid>` / `.e<jobid>`** — stdout/stderr from the job.

@@ -237,14 +237,25 @@ def _seed_xtb_outputs(workspace: Path, molecule: str = "water_synthetic") -> Non
         shutil.copyfile(xtb_fixture / label / "input.xtb.log", dest / "input.xtb.log")
 
 
-def _collect_manifest() -> dict[str, Any]:
+# Per-fixture (spiro_carbon_idx, chromene_oxygen_idx) for the constrained
+# C-O atom pair. water_synthetic is a 3-atom toy with C@0 / O@1; dimethylSP
+# is real BIPS xtb output where the spiro C and chromene O sit at idx 10
+# and 19 (verified: |r10 - r19| ~ 3.40 Å, matching the MECP target).
+_FIXTURE_PREP_INDICES: dict[str, tuple[int, int]] = {
+    "water_synthetic": (0, 1),
+    "dimethylSP": (10, 19),
+}
+
+
+def _collect_manifest(molecule: str = "water_synthetic") -> dict[str, Any]:
+    spiro, oxygen = _FIXTURE_PREP_INDICES[molecule]
     return {
         "stages": {
             "prep": {
                 "status": "done",
                 "outputs": {
-                    "spiro_carbon_idx": 0,
-                    "chromene_oxygen_idx": 1,
+                    "spiro_carbon_idx": spiro,
+                    "chromene_oxygen_idx": oxygen,
                 },
             }
         }
@@ -313,5 +324,5 @@ def test_collect_succeeds_for_all_fixture_molecules(
     mol_name: str, tmp_path: Path
 ) -> None:
     _seed_xtb_outputs(tmp_path, mol_name)
-    result = xtb_stage.collect(_collect_manifest(), tmp_path, _collect_config())
+    result = xtb_stage.collect(_collect_manifest(mol_name), tmp_path, _collect_config())
     assert result["status"] == "done", result

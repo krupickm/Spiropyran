@@ -9,7 +9,7 @@ from rdkit.Chem import AllChem
 
 from spiropyran_dr.io_utils import (
     atomic_write_json,
-    read_crest_energies,
+    parse_crest_energy_from_comment,
     read_xyz,
     read_xyz_multiframe,
     write_xyz,
@@ -115,29 +115,22 @@ def test_read_xyz_multiframe_tolerates_trailing_blank_lines(tmp_path: Path) -> N
     assert frames[1][2] == "y"
 
 
-def test_read_crest_energies_one_column(tmp_path: Path) -> None:
-    text = "-12.345678\n-12.344000\n-12.342222\n"
-    src = tmp_path / "crest.energies"
-    _write(src, text)
-    energies = read_crest_energies(src)
-    assert energies == [-12.345678, -12.344000, -12.342222]
+def test_parse_crest_energy_from_comment_real_crest_format() -> None:
+    # Real CREST output: a single Hartree value, indented.
+    assert parse_crest_energy_from_comment("        -54.21320214") == -54.21320214
 
 
-def test_read_crest_energies_two_column(tmp_path: Path) -> None:
-    # CREST also emits "<index> <energy>" in some versions; we take the
-    # last numeric token per non-blank line.
-    text = "  1   -12.345678\n  2   -12.344000\n  3   -12.342222\n"
-    src = tmp_path / "crest.energies"
-    _write(src, text)
-    energies = read_crest_energies(src)
-    assert energies == [-12.345678, -12.344000, -12.342222]
+def test_parse_crest_energy_from_comment_with_trailing_tokens() -> None:
+    # Synthetic fixtures append a relative energy and a label; first token wins.
+    assert (
+        parse_crest_energy_from_comment("   -22.10000000     0.00000000  conf 0")
+        == -22.10000000
+    )
 
 
-def test_read_crest_energies_skips_blank_lines(tmp_path: Path) -> None:
-    text = "\n-1.0\n\n-2.0\n   \n"
-    src = tmp_path / "crest.energies"
-    _write(src, text)
-    assert read_crest_energies(src) == [-1.0, -2.0]
+def test_parse_crest_energy_from_comment_rejects_empty() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        parse_crest_energy_from_comment("   ")
 
 
 def test_write_xyz_from_arrays_round_trips(tmp_path: Path) -> None:

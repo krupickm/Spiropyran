@@ -150,10 +150,12 @@ sentinels:
   xtb with `--namespace input`, prefixing all output files with the
   basename of the input geometry so multiple runs can coexist.)
 - **crest**: per label (`anti_min`, `syn_min`, `anti_mecp`, `syn_mecp`):
-  presence of *both* `crest_conformers.xyz` and `crest.energies` in the
-  per-label work directory. CREST writes them only on a clean exit;
-  absence of either in any label => failure. No separate `crest_done`
-  flag file.
+  presence of `crest_conformers.xyz` in the per-label work directory.
+  CREST writes it only on a clean exit; absence in any label => failure.
+  Absolute electronic energies are read from the first whitespace token
+  of each frame's comment line. The sibling `crest.energies` holds only
+  relative energies (kcal/mol) and is intentionally not consumed. No
+  separate `crest_done` flag file.
 - **dft_sp / dft_freq**: `ORCA TERMINATED NORMALLY` string in `orca.out`,
   per conformer per label.
 
@@ -638,8 +640,9 @@ separate named set (e.g. `sp1_bips`, `sp2_nitro`).
 <name>/
 ├── crest/
 │   ├── anti_min/
-│   │   ├── crest_conformers.xyz   # multi-frame XYZ from CREST
-│   │   └── crest.energies         # one energy per conformer (idx E or E format)
+│   │   └── crest_conformers.xyz   # multi-frame XYZ from CREST; comment line of
+│   │                              # each frame begins with the absolute energy
+│   │                              # in Hartree
 │   ├── syn_min/   (same)
 │   ├── anti_mecp/ (same)
 │   └── syn_mecp/  (same)
@@ -650,11 +653,14 @@ separate named set (e.g. `sp1_bips`, `sp2_nitro`).
     └── syn/ (same)
 ```
 
+The collector parses energies straight from `crest_conformers.xyz`; `crest.energies`
+holds only relative energies (kcal/mol) and is not read. It can be left in the
+fixture directory if convenient but is not required.
+
 **Trimming large outputs:** CREST can produce hundreds of conformers. Keep the
 file format byte-for-byte identical to what the cluster wrote, but truncate
-`crest_conformers.xyz` to 5–10 frames and remove the matching trailing lines
-from `crest.energies` so the counts stay consistent. Do not alter spacing,
-scientific notation, or the comment line format.
+`crest_conformers.xyz` to 5–10 frames. Do not alter spacing, scientific
+notation, or the comment line format.
 
 **Registration is automatic:** `fixture_molecule_names()` in `conftest.py`
 scans `tests/fixtures/molecules/` at import time. Any new subdirectory is
@@ -797,9 +803,12 @@ seed source and constraint state.
     MetaCentrum), method (GFN2), and ewin (6 kcal/mol) all come from the
     wrapper plus CREST defaults and are owned by `sub_crest.sh`. No other
     CREST flags are threaded from Python.
-- `collect`, per label: parse `crest_conformers.xyz` (multi-frame XYZ)
-  and `crest.energies`. Take up to
-  `ensemble.max_conformers_per_diastereomer` lowest-energy conformers (no
+- `collect`, per label: parse `crest_conformers.xyz` (multi-frame XYZ).
+  CREST writes the ensemble already sorted lowest-first; the absolute
+  electronic energy (Hartree) for each frame is the first whitespace token
+  of its comment line. The sibling `crest.energies` file holds only
+  relative energies (kcal/mol) and is not consumed. Take up to
+  `ensemble.max_conformers_per_diastereomer` of the leading frames (no
   extra ewin filter; CREST already applied its own). Write survivors as
   `crest/{label}/filtered/conf_{i}.xyz` for downstream stages.
 - Output: per label, a list of filtered conformer XYZ paths and CREST

@@ -78,21 +78,18 @@ def read_xyz_multiframe(
     return frames
 
 
-def read_crest_energies(path: Path) -> list[float]:
-    """Parse `crest.energies` -> list of energies in Hartree.
+def parse_crest_energy_from_comment(comment: str) -> float:
+    """Extract the absolute electronic energy (Hartree) from a CREST
+    `crest_conformers.xyz` frame comment line.
 
-    Tolerates one-column (`E`) or two-column (`idx E`) layouts by taking
-    the last numeric token of each non-blank line. This matches what
-    CREST has emitted across recent versions.
+    CREST writes the absolute Hartree energy as the first whitespace-
+    separated token of the comment line; the `crest.energies` sidecar
+    holds only relative energies (kcal/mol) and is not consulted.
     """
-    energies: list[float] = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        stripped = raw.strip()
-        if not stripped:
-            continue
-        tokens = stripped.split()
-        energies.append(float(tokens[-1]))
-    return energies
+    tokens = comment.split()
+    if not tokens:
+        raise ValueError("empty CREST comment line; expected absolute energy")
+    return float(tokens[0])
 
 
 def write_xyz_from_arrays(

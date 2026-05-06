@@ -368,18 +368,32 @@ def test_submit_seeds_min_from_mm_output(
 
 
 def _seed_crest_outputs(workspace: Path, molecule: str = "water_synthetic") -> None:
-    """Copy fixture CREST outputs into all 4 label directories."""
+    """Copy fixture crest_conformers.xyz files into all 4 label directories.
+
+    `crest.energies` is intentionally not copied: the stage parses absolute
+    energies from the xyz comment lines and never reads the sidecar file.
+
+    If a fixture set is missing a label (e.g. dimethylSP has only anti_*),
+    mirror the first available label's xyz into the missing slot so the
+    full-pipeline `collect()` smoke test still has something to parse.
+    """
     crest_fixture = fixture_molecule_dir(molecule) / "crest"
+    available = [
+        lbl
+        for lbl in ("anti_min", "syn_min", "anti_mecp", "syn_mecp")
+        if (crest_fixture / lbl / "crest_conformers.xyz").is_file()
+    ]
+    if not available:
+        raise FileNotFoundError(
+            f"fixture {molecule!r} has no crest_conformers.xyz under any label"
+        )
+    fallback = crest_fixture / available[0] / "crest_conformers.xyz"
     for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
         dest = workspace / "crest" / label
         dest.mkdir(parents=True, exist_ok=True)
+        src = crest_fixture / label / "crest_conformers.xyz"
         shutil.copyfile(
-            crest_fixture / label / "crest_conformers.xyz",
-            dest / "crest_conformers.xyz",
-        )
-        shutil.copyfile(
-            crest_fixture / label / "crest.energies",
-            dest / "crest.energies",
+            src if src.is_file() else fallback, dest / "crest_conformers.xyz"
         )
 
 
@@ -431,7 +445,6 @@ def test_collect_fails_when_outputs_missing(tmp_path: Path) -> None:
     shutil.copyfile(
         crest_fixture / label / "crest_conformers.xyz", dest / "crest_conformers.xyz"
     )
-    shutil.copyfile(crest_fixture / label / "crest.energies", dest / "crest.energies")
 
     result = crest_stage.collect({}, tmp_path, _config())
     assert result["status"] == "failed"
@@ -439,14 +452,77 @@ def test_collect_fails_when_outputs_missing(tmp_path: Path) -> None:
     assert "syn_min" in result["failure_reason"].lower()
 
 
-def test_collect_fails_on_count_mismatch(tmp_path: Path) -> None:
+def test_collect_fails_when_comment_has_no_energy(tmp_path: Path) -> None:
     _seed_crest_outputs(tmp_path)
-    (tmp_path / "crest" / "anti_min" / "crest.energies").write_text(
-        "  1   -76.40000000\n", encoding="utf-8"
-    )
+    # Wipe the comment line of the first frame so the absolute-energy parse fails.
+    path = tmp_path / "crest" / "anti_min" / "crest_conformers.xyz"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    lines[1] = ""
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
     result = crest_stage.collect({}, tmp_path, _config())
     assert result["status"] == "failed"
-    assert "mismatch" in result["failure_reason"].lower()
+    assert "energy" in result["failure_reason"].lower()
+
+
+# Hand-curated reference data: pin absolute Hartree energies to the values
+# written in fixture comment lines, and pin relative kcal/mol to the value
+# they should compute to via 627.5094740631 kcal/mol per Hartree (CODATA).
+# 0.002 Eh -> 1.255019 kcal/mol; 0.005 Eh -> 3.137547 kcal/mol;
+# 0.003 Eh -> 1.882528 kcal/mol.
+_WATER_REFERENCE: dict[str, list[tuple[float, float]]] = {
+    "anti_min": [
+        (-76.40000000, 0.0),
+        (-76.39800000, 1.2550189),
+        (-76.39500000, 3.1375474),
+    ],
+    "syn_min": [
+        (-76.41000000, 0.0),
+        (-76.40700000, 1.8825284),
+    ],
+    "anti_mecp": [
+        (-22.10000000, 0.0),
+        (-22.09800000, 1.2550189),
+    ],
+    "syn_mecp": [
+        (-22.11000000, 0.0),
+        (-22.10700000, 1.8825284),
+    ],
+}
+
+
+def test_collect_matches_water_reference_energies(tmp_path: Path) -> None:
+    _seed_crest_outputs(tmp_path, "water_synthetic")
+    result = crest_stage.collect({}, tmp_path, _config())
+    assert result["status"] == "done", result
+    for label, expected in _WATER_REFERENCE.items():
+        entries = result["outputs"][label]
+        assert len(entries) == len(expected), label
+        for entry, (e_h, rel_kcal) in zip(entries, expected):
+            assert entry["energy_hartree"] == pytest.approx(e_h, abs=1e-8)
+            assert entry["relative_energy_kcal_mol"] == pytest.approx(
+                rel_kcal, abs=1e-3
+            )
+
+
+# dimethylSP fixtures are real CREST output (anti_min and anti_mecp only;
+# the syn_* slots are mirrored from anti_min by _seed_crest_outputs). The
+# absolute energies are read directly from the xyz comment lines, and the
+# computed relative kcal/mol must match CREST's own crest.energies
+# (1.545 kcal/mol for the second anti_min frame) within rounding.
+def test_collect_matches_dimethylsp_reference_energies(tmp_path: Path) -> None:
+    _seed_crest_outputs(tmp_path, "dimethylSP")
+    result = crest_stage.collect({}, tmp_path, _config())
+    assert result["status"] == "done", result
+
+    anti_min = result["outputs"]["anti_min"]
+    assert anti_min[0]["energy_hartree"] == pytest.approx(-54.21320214, abs=1e-8)
+    assert anti_min[1]["energy_hartree"] == pytest.approx(-54.21074041, abs=1e-8)
+    # CREST's own crest.energies records 1.545 kcal/mol for frame 1.
+    assert anti_min[1]["relative_energy_kcal_mol"] == pytest.approx(1.545, abs=1e-3)
+
+    anti_mecp = result["outputs"]["anti_mecp"]
+    assert anti_mecp[0]["energy_hartree"] == pytest.approx(-54.16149241, abs=1e-8)
 
 
 @pytest.mark.parametrize("mol_name", fixture_molecule_names())

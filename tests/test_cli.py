@@ -16,7 +16,11 @@ def _seed_crest_outputs(
     labels=("anti_min", "syn_min", "anti_mecp", "syn_mecp"),
     molecule: str = "water_synthetic",
 ) -> None:
-    """Drop fixture crest_conformers.xyz / crest.energies into workspace/crest/<label>/."""
+    """Drop fixture crest_conformers.xyz into workspace/crest/<label>/.
+
+    `crest.energies` is intentionally not seeded: the stage parses absolute
+    energies from the xyz comment lines and never reads the sidecar file.
+    """
     crest_fixture = fixture_molecule_dir(molecule) / "crest"
     for label in labels:
         dest = workspace / "crest" / label
@@ -24,10 +28,6 @@ def _seed_crest_outputs(
         shutil.copyfile(
             crest_fixture / label / "crest_conformers.xyz",
             dest / "crest_conformers.xyz",
-        )
-        shutil.copyfile(
-            crest_fixture / label / "crest.energies",
-            dest / "crest.energies",
         )
 
 
