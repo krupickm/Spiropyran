@@ -12,12 +12,16 @@ XTB_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "xtb_constr"
 
 
 def _seed_xtb_outputs(workspace: Path) -> None:
-    """Drop fixture xtbopt.xyz / xtb.out into workspace/xtb_constr/{anti,syn}/."""
+    """Drop fixture input.xtbopt.xyz / input.xtb.log into workspace/xtb_constr/{anti,syn}/."""
     for label in ("anti", "syn"):
         dest = workspace / "xtb_constr" / label
         dest.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(XTB_FIXTURES / label / "xtbopt.xyz", dest / "xtbopt.xyz")
-        shutil.copyfile(XTB_FIXTURES / label / "xtb.out", dest / "xtb.out")
+        shutil.copyfile(
+            XTB_FIXTURES / label / "input.xtbopt.xyz", dest / "input.xtbopt.xyz"
+        )
+        shutil.copyfile(
+            XTB_FIXTURES / label / "input.xtb.log", dest / "input.xtb.log"
+        )
 
 
 def _retarget_prep_indices_to_fixture(workspace: Path) -> None:
@@ -340,8 +344,8 @@ def test_cli_xtb_collect_fails_on_constraint_violation(
 
     _seed_xtb_outputs(tmp_path)
     _retarget_prep_indices_to_fixture(tmp_path)
-    # Overwrite anti xtbopt.xyz with a clearly off-target geometry (3.55 A).
-    (tmp_path / "xtb_constr" / "anti" / "xtbopt.xyz").write_text(
+    # Overwrite anti input.xtbopt.xyz with a clearly off-target geometry (3.55 A).
+    (tmp_path / "xtb_constr" / "anti" / "input.xtbopt.xyz").write_text(
         "3\nbad geometry\nC 0.0 0.0 0.0\nO 3.55 0.0 0.0\nH 0.0 1.0 0.0\n",
         encoding="utf-8",
     )

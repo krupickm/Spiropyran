@@ -207,31 +207,34 @@ def collect(
 
     outputs: dict[str, list[dict[str, Any]]] = {}
 
+    # sub_xtb.sh runs `xtb --namespace input ...`, so xtb's own outputs
+    # (xtbopt.xyz, xtbopt.log, ...) and the wrapper's stdout redirection
+    # (xtb.log) are all prefixed with the basename of the input geometry.
     for label in LABELS:
         work_dir = _label_dir(workspace, label)
-        xtbopt_path = work_dir / "xtbopt.xyz"
-        xtbout_path = work_dir / "xtb.out"
+        xtbopt_path = work_dir / "input.xtbopt.xyz"
+        xtblog_path = work_dir / "input.xtb.log"
 
         if not xtbopt_path.is_file():
             return {
                 "status": "failed",
                 "finished_at": _now_iso(),
-                "failure_reason": f"xtbopt.xyz missing for {label}",
+                "failure_reason": f"input.xtbopt.xyz missing for {label}",
             }
-        if not xtbout_path.is_file():
+        if not xtblog_path.is_file():
             return {
                 "status": "failed",
                 "finished_at": _now_iso(),
-                "failure_reason": f"xtb.out missing for {label}",
+                "failure_reason": f"input.xtb.log missing for {label}",
             }
 
         try:
-            energy = _parse_xtb_total_energy(xtbout_path)
+            energy = _parse_xtb_total_energy(xtblog_path)
         except ValueError as exc:
             return {
                 "status": "failed",
                 "finished_at": _now_iso(),
-                "failure_reason": f"xtb.out parse failed for {label}: {exc}",
+                "failure_reason": f"input.xtb.log parse failed for {label}: {exc}",
             }
 
         co_dist = _measure_co_distance(xtbopt_path, idx_a, idx_b)
@@ -245,7 +248,7 @@ def collect(
                 ),
             }
 
-        xyz_rel = f"xtb_constr/{label}/xtbopt.xyz"
+        xyz_rel = f"xtb_constr/{label}/input.xtbopt.xyz"
         outputs[label] = [
             {
                 "conf_id": 0,

@@ -230,8 +230,10 @@ def _seed_xtb_outputs(workspace: Path) -> None:
     for label in ("anti", "syn"):
         dest = workspace / "xtb_constr" / label
         dest.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(FIXTURES / label / "xtbopt.xyz", dest / "xtbopt.xyz")
-        shutil.copyfile(FIXTURES / label / "xtb.out", dest / "xtb.out")
+        shutil.copyfile(
+            FIXTURES / label / "input.xtbopt.xyz", dest / "input.xtbopt.xyz"
+        )
+        shutil.copyfile(FIXTURES / label / "input.xtb.log", dest / "input.xtb.log")
 
 
 def _collect_manifest() -> dict[str, Any]:
@@ -272,13 +274,13 @@ def test_collect_parses_xtbopt_and_xtb_out(tmp_path: Path) -> None:
         e = entries[0]
         assert abs(e["co_distance_final_ang"] - 3.402) < 1e-6
         assert e["energy_hartree"] < 0
-        assert e["xyz"] == f"xtb_constr/{label}/xtbopt.xyz"
+        assert e["xyz"] == f"xtb_constr/{label}/input.xtbopt.xyz"
 
 
 def test_collect_fails_on_constraint_violation(tmp_path: Path) -> None:
     _seed_xtb_outputs(tmp_path)
     # Overwrite anti xtbopt.xyz with a C-O distance far from 3.4 Å (3.55)
-    (tmp_path / "xtb_constr" / "anti" / "xtbopt.xyz").write_text(
+    (tmp_path / "xtb_constr" / "anti" / "input.xtbopt.xyz").write_text(
         "3\nbad geometry\nC 0.0 0.0 0.0\nO 3.55 0.0 0.0\nH 0.0 1.0 0.0\n",
         encoding="utf-8",
     )
@@ -289,10 +291,10 @@ def test_collect_fails_on_constraint_violation(tmp_path: Path) -> None:
 
 def test_collect_fails_when_xtbopt_missing(tmp_path: Path) -> None:
     _seed_xtb_outputs(tmp_path)
-    (tmp_path / "xtb_constr" / "anti" / "xtbopt.xyz").unlink()
+    (tmp_path / "xtb_constr" / "anti" / "input.xtbopt.xyz").unlink()
     result = xtb_stage.collect(_collect_manifest(), tmp_path, _collect_config())
     assert result["status"] == "failed"
-    assert "xtbopt.xyz" in result["failure_reason"]
+    assert "input.xtbopt.xyz" in result["failure_reason"]
 
 
 def test_collect_outputs_single_element_list_per_label(tmp_path: Path) -> None:

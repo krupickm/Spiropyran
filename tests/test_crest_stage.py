@@ -33,8 +33,8 @@ def _ready_manifest() -> dict[str, Any]:
             "xtb_constr": {
                 "status": "done",
                 "outputs": {
-                    "anti": [{"conf_id": 0, "xyz": "xtb_constr/anti/xtbopt.xyz"}],
-                    "syn": [{"conf_id": 0, "xyz": "xtb_constr/syn/xtbopt.xyz"}],
+                    "anti": [{"conf_id": 0, "xyz": "xtb_constr/anti/input.xtbopt.xyz"}],
+                    "syn": [{"conf_id": 0, "xyz": "xtb_constr/syn/input.xtbopt.xyz"}],
                 },
             },
             "mm": {
@@ -128,7 +128,9 @@ def _seed_xtb_constr_outputs(workspace: Path) -> None:
     for label in ("anti", "syn"):
         d = workspace / "xtb_constr" / label
         d.mkdir(parents=True, exist_ok=True)
-        (d / "xtbopt.xyz").write_text("1\nxtb seed\nC 0 0 0\n", encoding="utf-8")
+        (d / "input.xtbopt.xyz").write_text(
+            "1\nxtb seed\nC 0 0 0\n", encoding="utf-8"
+        )
 
 
 def _full_manifest(workspace: Path) -> dict[str, Any]:
@@ -146,14 +148,14 @@ def _full_manifest(workspace: Path) -> dict[str, Any]:
                     "anti": [
                         {
                             "conf_id": 0,
-                            "xyz": "xtb_constr/anti/xtbopt.xyz",
+                            "xyz": "xtb_constr/anti/input.xtbopt.xyz",
                             "label": "anti",
                         }
                     ],
                     "syn": [
                         {
                             "conf_id": 0,
-                            "xyz": "xtb_constr/syn/xtbopt.xyz",
+                            "xyz": "xtb_constr/syn/input.xtbopt.xyz",
                             "label": "syn",
                         }
                     ],
@@ -339,7 +341,7 @@ def test_submit_seeds_mecp_from_xtb_constr_output(
         copied = (tmp_path / "crest" / f"{base}_mecp" / "input.xyz").read_text(
             encoding="utf-8"
         )
-        original = (tmp_path / "xtb_constr" / base / "xtbopt.xyz").read_text(
+        original = (tmp_path / "xtb_constr" / base / "input.xtbopt.xyz").read_text(
             encoding="utf-8"
         )
         assert copied == original

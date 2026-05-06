@@ -141,12 +141,14 @@ indicator. After detecting finish, parse outputs and decide success vs
 failure by inspecting the stage's natural success signal. Per-stage
 sentinels:
 
-- **xtb_constr**: per base label (`anti`, `syn`): `xtbopt.xyz` present in
-  the per-label work directory, and the measured C-O distance between
-  `spiro_carbon_idx` and `chromene_oxygen_idx` within
+- **xtb_constr**: per base label (`anti`, `syn`): `input.xtbopt.xyz`
+  present in the per-label work directory, and the measured C-O distance
+  between `spiro_carbon_idx` and `chromene_oxygen_idx` within
   `xtb_constr.co_distance_tolerance_angstrom` of
   `mecp.c_o_distance_angstrom`. Final energy parsed from the
-  `TOTAL ENERGY ... Eh` line in `xtb.out`.
+  `TOTAL ENERGY ... Eh` line in `input.xtb.log`. (`sub_xtb.sh` invokes
+  xtb with `--namespace input`, prefixing all output files with the
+  basename of the input geometry so multiple runs can coexist.)
 - **crest**: per label (`anti_min`, `syn_min`, `anti_mecp`, `syn_mecp`):
   presence of *both* `crest_conformers.xyz` and `crest.energies` in the
   per-label work directory. CREST writes them only on a clean exit;
@@ -246,7 +248,7 @@ Single source of truth per molecule. JSON, hand-editable, lives at
                      "submitted_at": "...", "finished_at": "...",
                      "outputs":
                        { "anti": [ { "conf_id": 0,
-                                     "xyz": "xtb_constr/anti/xtbopt.xyz",
+                                     "xyz": "xtb_constr/anti/input.xtbopt.xyz",
                                      "energy_hartree": -22.123,
                                      "co_distance_final_ang": 3.402,
                                      "label": "anti" } ],
@@ -294,7 +296,7 @@ entries inside each stage's `outputs`, regardless of length:
   "outputs": {
     "anti": [
       { "conf_id": 0,
-        "xyz": "xtb_constr/anti/xtbopt.xyz",
+        "xyz": "xtb_constr/anti/input.xtbopt.xyz",
         "energy_hartree": -22.123,
         "co_distance_final_ang": 3.402,
         "label": "anti" }
@@ -356,9 +358,12 @@ Walltime / queue settings are not part of the hash.
                 │   ├── anti/
                 │   │   ├── input.xyz                   (copy of mm/anti/conf_0.xyz)
                 │   │   ├── xtb.inp                     ($constrain block, --input target)
+                │   │   ├── XTBJOB_input_<pid>.sh       (written by sub_xtb.sh)
                 │   │   ├── jobid
-                │   │   ├── xtbopt.xyz
-                │   │   └── xtb.out
+                │   │   ├── input.xtbopt.xyz           (xtb writes with --namespace input)
+                │   │   ├── input.xtbopt.log
+                │   │   ├── input.xtb.log              (wrapper stdout; parsed for TOTAL ENERGY)
+                │   │   └── input.{charges,wbo,xtbrestart,xtbtopo.mol}
                 │   └── syn/ ...
                 ├── crest/
                 │   ├── anti_min/
@@ -372,7 +377,7 @@ Walltime / queue settings are not part of the hash.
                 │   │       └── conf_{0..K}.xyz
                 │   ├── syn_min/    ...
                 │   ├── anti_mecp/
-                │   │   ├── input.xyz                   (copy of xtb_constr/anti/xtbopt.xyz)
+                │   │   ├── input.xyz                   (copy of xtb_constr/anti/input.xtbopt.xyz)
                 │   │   ├── .xcontrol                   ($constrain block, --cinp target)
                 │   │   ├── CRESTJOB_input_<pid>.sh
                 │   │   ├── jobid
@@ -602,7 +607,7 @@ spiropyran_dr/
 tests/
 ├── conftest.py
 ├── fixtures/                # canned QC outputs (CREST, ORCA, xTB)
-│   ├── xtb_constr/{anti,syn}/{xtbopt.xyz, xtb.out}
+│   ├── xtb_constr/{anti,syn}/{input.xtbopt.xyz, input.xtb.log}
 │   └── crest/{anti_min,syn_min,anti_mecp,syn_mecp}/{crest_conformers.xyz, crest.energies}
 ├── test_io_utils.py
 ├── test_config_utils.py
@@ -700,12 +705,16 @@ CREST (10.4) directly.
     <other-xtb-args>...` and runs xTB on 1 CPU; the orchestrator passes
     `--opt` (geometry optimisation), `--gfn 2` (method, derived from
     `xtb_constr.method == "gfn2"`), and `--input xtb.inp` (read the
-    constraint block) as the pass-through args.
+    constraint block) as the pass-through args. The wrapper internally
+    runs xtb with `--namespace <basename(coord.xyz)>`, so all xtb output
+    files (and the wrapper's stdout log) are prefixed with that basename
+    — for `input.xyz` the result geometry is `input.xtbopt.xyz` and the
+    log is `input.xtb.log`.
   - Capture the wrapper stdout to record the PBS job id.
 - `collect`, per base label:
-  - Parse `xtb_constr/{label}/xtbopt.xyz` (single frame).
+  - Parse `xtb_constr/{label}/input.xtbopt.xyz` (single frame).
   - Parse the final energy in Hartree from the line containing
-    `TOTAL ENERGY` in `xtb_constr/{label}/xtb.out`.
+    `TOTAL ENERGY` in `xtb_constr/{label}/input.xtb.log`.
   - Measure the final C-O distance between the two constrained atoms.
     Reject (status `failed`) if
     `|measured - mecp.c_o_distance_angstrom| > xtb_constr.co_distance_tolerance_angstrom`.
@@ -714,7 +723,7 @@ CREST (10.4) directly.
   ```
   outputs[label] = [
     { conf_id: 0,
-      xyz: "xtb_constr/<label>/xtbopt.xyz",
+      xyz: "xtb_constr/<label>/input.xtbopt.xyz",
       energy_hartree: <float>,
       co_distance_final_ang: <float>,
       label: "<label>" }
@@ -732,7 +741,7 @@ seed source and constraint state.
   - `_min`: the lowest-energy MM conformer for the matching base label
     (`mm/{anti,syn}/conf_0.xyz`).
   - `_mecp`: the seed geometry from `xtb_constr.outputs[<base>][0].xyz`
-    (i.e. `xtb_constr/{anti,syn}/xtbopt.xyz`).
+    (i.e. `xtb_constr/{anti,syn}/input.xtbopt.xyz`).
 - Action, per label:
   - Copy the seed to `crest/{label}/input.xyz`.
   - For `_mecp` labels only: write `crest/{label}/.xcontrol` with the
