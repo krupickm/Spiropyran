@@ -87,9 +87,9 @@ SMILES (one molecule)
                                    constraint is enforced via .xcontrol passed
                                    through sub_crest.sh as `--cinp .xcontrol`.
     ▼
-[5] dft_sp          PBS        ORCA single point: r2SCAN-3c → ωB97X-D3BJ/def2-TZVP
-                               with SMD, per surviving conformer per label
-                               (4 labels).
+[5] dft_sp          PBS        ORCA single point: r2SCAN-3c/CPCM. One job per
+                               label (4 labels); each job processes all filtered
+                               conformers via multi-frame XYZ input.
     ▼
 [6] dft_freq        PBS        OPTIONAL: ORCA frequency calc at the (constrained
                                or unconstrained) CREST geometry → thermal
@@ -156,8 +156,9 @@ sentinels:
   of each frame's comment line. The sibling `crest.energies` holds only
   relative energies (kcal/mol) and is intentionally not consumed. No
   separate `crest_done` flag file.
-- **dft_sp / dft_freq**: `ORCA TERMINATED NORMALLY` string in `orca.out`,
-  per conformer per label.
+- **dft_sp / dft_freq**: `ORCA TERMINATED NORMALLY` string in `orca.out`
+  per label (one file per label; one ORCA job covers all conformers for that
+  label via multi-frame XYZ input).
 
 ### 3.2 Module loading
 
@@ -185,10 +186,10 @@ def submit(manifest: dict, workspace: Path, config: dict) -> dict:
         submitted_at. Stages that submit a fixed number of jobs keyed by
         label key by that label string -- xtb_constr by base diastereomer
         ('anti', 'syn'); crest by the four label scheme ('anti_min',
-        'syn_min', 'anti_mecp', 'syn_mecp'). Stages that submit per
-        conformer (dft_sp, dft_freq) key by a flat '{label}/conf_{i}'
-        string. Per-job work directories are derivable from the workspace
-        and stage conventions; they are not stored in the manifest.
+        'syn_min', 'anti_mecp', 'syn_mecp'); dft_sp and dft_freq also by
+        label string (one job per label, multi-frame XYZ input). Per-job
+        work directories are derivable from the workspace and stage
+        conventions; they are not stored in the manifest.
       - For local stages: outputs (stage-specific dict), finished_at
       - For status=='failed': failure_reason (str), finished_at
     """
@@ -262,7 +263,13 @@ Single source of truth per molecule. JSON, hand-editable, lives at
                          "anti_mecp": "12347.meta-pbs",
                          "syn_mecp":  "12348.meta-pbs" },
                      "submitted_at": "..." },
-    "dft_sp":      { "status": "pending" },
+    "dft_sp":      { "status": "submitted",
+                     "pbs_job_ids":
+                       { "anti_min":  "12349.meta-pbs",
+                         "syn_min":   "12350.meta-pbs",
+                         "anti_mecp": "12351.meta-pbs",
+                         "syn_mecp":  "12352.meta-pbs" },
+                     "submitted_at": "..." },
     "dft_freq":    { "status": "skipped" },
     "aggregate":   { "status": "pending" }
   },
@@ -285,12 +292,14 @@ Single source of truth per molecule. JSON, hand-editable, lives at
 
 Stage 3 (`xtb_constr`) operates per base diastereomer (`anti`, `syn`) and
 produces a single MECP-mimic seed geometry per label. Stages 4–6 (`crest`,
-`dft_sp`, `dft_freq`) operate per surviving conformer per **label**, where
-"label" is one of the four `{anti_min, syn_min, anti_mecp, syn_mecp}` keys
-(the `_min` branches come from unconstrained CREST on the closed ground
-state; the `_mecp` branches come from constrained CREST on the
-`xtb_constr` seed). The manifest always records a list of conformer
-entries inside each stage's `outputs`, regardless of length:
+`dft_sp`, `dft_freq`) all work over the four **label** keys
+`{anti_min, syn_min, anti_mecp, syn_mecp}` (the `_min` branches come from
+unconstrained CREST on the closed ground state; the `_mecp` branches come
+from constrained CREST on the `xtb_constr` seed). Stage 4 submits one PBS
+job per label; stages 5–6 also submit one PBS job per label, with all
+conformers for that label processed as a multi-frame XYZ by a single ORCA
+call. The manifest always records a list of conformer entries inside each
+stage's `outputs`, regardless of length:
 
 ```json
 "xtb_constr": {
@@ -391,12 +400,10 @@ Walltime / queue settings are not part of the hash.
                 │   └── syn_mecp/   ...
                 ├── dft_sp/
                 │   ├── anti_min/
-                │   │   ├── conf_0/
-                │   │   │   ├── orca.inp
-                │   │   │   ├── pbs.sh
-                │   │   │   ├── jobid
-                │   │   │   └── orca.out
-                │   │   └── conf_1/ ...
+                │   │   ├── conformers.xyz              (filtered CREST conformers, concatenated)
+                │   │   ├── orca.inp                    (references conformers.xyz via *xyzfile)
+                │   │   ├── jobid
+                │   │   └── orca.out                    (ORCA stdout; one SP block per frame)
                 │   ├── syn_min/    ...
                 │   ├── anti_mecp/  ...
                 │   └── syn_mecp/   ...
@@ -591,12 +598,13 @@ spiropyran_dr/
 │   ├── dft_freq_stage.py
 │   └── aggregate.py
 ├── templates/
-│   ├── pbs_orchestrator.j2
-│   ├── pbs_orca_sp.j2
-│   └── pbs_orca_freq.j2
-│   # Note: no pbs_crest.j2 or pbs_xtb_constrained.j2. Both CREST and
-│   # constrained xTB submission are delegated to user-maintained wrappers
-│   # (sub_crest.sh / sub_xtb.sh). Only ORCA jobs use rendered templates.
+│   └── pbs_orchestrator.j2
+│   # Note: no pbs_crest.j2, pbs_xtb_constrained.j2, or pbs_orca_sp.j2.
+│   # CREST and constrained xTB submission are delegated to user-maintained
+│   # wrappers (sub_crest.sh / sub_xtb.sh). ORCA input files (orca.inp) are
+│   # generated inline by the stage module using f-strings; no Jinja2 template
+│   # is used for dft_sp or dft_freq because the input is simple enough that
+│   # a template adds no value. Jinja2 is not a project dependency.
 ├── config/
 │   ├── default.yaml
 │   └── smarts.yaml
@@ -612,7 +620,9 @@ tests/
 │   └── molecules/           # one subdirectory per named molecule set
 │       ├── water_synthetic/ # built-in synthetic data (3-atom toy, always present)
 │       │   ├── crest/{anti_min,syn_min,anti_mecp,syn_mecp}/{crest_conformers.xyz,crest.energies}
-│       │   └── xtb_constr/{anti,syn}/{input.xtbopt.xyz,input.xtb.log}
+│       │   ├── xtb_constr/{anti,syn}/{input.xtbopt.xyz,input.xtb.log}
+│       │   └── dft_sp/{anti_min,syn_min,anti_mecp,syn_mecp}/orca.out
+│       │       # also: dft_sp/anti_min_failed/orca.out (abnormal-termination fixture)
 │       └── <name>/          # real cluster output dropped in by the developer (see below)
 │           ├── crest/...
 │           └── xtb_constr/...
@@ -816,22 +826,27 @@ seed source and constraint state.
   implicitly; downstream DFT does not need to re-impose it because the
   geometries are already at the MECP-mimic distance.
 
-### 10.5 dft_sp (PBS, one job per surviving conformer per label)
+### 10.5 dft_sp (PBS, one job per label — four jobs total)
 
 - Input: filtered CREST conformers from each of the four labels
   (`anti_min`, `syn_min`, `anti_mecp`, `syn_mecp`). The `_mecp` geometries
   carry the C-O distance constraint implicitly (set by constrained CREST);
   the `_min` geometries are unconstrained ground-state minima.
-- Action: ORCA single-point with two-stage protocol:
-  1. r2SCAN-3c (fast, sanity check)
-  2. ωB97X-D3BJ / def2-TZVP with SMD on the same geometry
-  Single ORCA input file with two `! ...` lines and a `%scf` block, or two
-  separate jobs — implementer's choice; the manifest must record both
-  energies.
-- `collect`: parse final SCF energies. Verify normal termination
-  (`ORCA TERMINATED NORMALLY` in stdout).
-- Output: r2SCAN-3c and ωB97X-D3BJ electronic energies in Hartree, per
-  conformer, keyed by label.
+- Action: one ORCA job per label. `submit()` concatenates the filtered
+  per-label conformer XYZ files into a single multi-frame
+  `dft_sp/{label}/conformers.xyz`, writes `dft_sp/{label}/orca.inp`
+  with `*xyzfile 0 1 conformers.xyz`, and invokes:
+    `suborca.sh orca.inp <dft_sp.walltime_hours>`
+  from the per-label work directory. ORCA computes an r2SCAN-3c SP energy
+  for each frame sequentially. Solvation model is CPCM (hardcoded;
+  r2SCAN-3c was parametrized with CPCM); solvent name comes from
+  `dft.solvent.name`. Resources: `dft_sp.ncpus` CPUs (default 2),
+  `dft_sp.mem_per_core_mb` MB/core (default 4000).
+- `collect`: for each label, verify `ORCA TERMINATED NORMALLY` in
+  `orca.out`; parse all `FINAL SINGLE POINT ENERGY` lines (one per frame);
+  verify count matches the number of conformers submitted.
+- Output: r2SCAN-3c electronic energy in Hartree, per conformer, keyed by
+  label. `pbs_job_ids` is keyed by label string (not per-conformer).
 
 ### 10.6 dft_freq (PBS, optional, one job per surviving conformer per label)
 
@@ -923,6 +938,8 @@ predict_dr.py xtb_constr   <SMILES> --workspace PATH    # prep+mm+submit 2 PBS
 predict_dr.py xtb_collect           --workspace PATH    # parse xtb outputs
 predict_dr.py crest                 --workspace PATH    # submit 4 PBS
 predict_dr.py crest_collect         --workspace PATH    # parse crest outputs
+predict_dr.py dft_sp                --workspace PATH    # submit 4 ORCA PBS jobs
+predict_dr.py dft_sp_collect        --workspace PATH    # parse dft_sp outputs
 ```
 
 Each `*_collect` command reads `manifest.json`, requires the upstream

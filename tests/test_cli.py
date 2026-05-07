@@ -585,3 +585,146 @@ def test_cli_crest_collect_fails_on_missing_outputs(
     ]["crest"]
     assert crest_block["status"] == "failed"
     assert "failure_reason" in crest_block
+
+
+# ---------------------------------------------------------------------------
+# dft_sp / dft_sp_collect CLI
+# ---------------------------------------------------------------------------
+
+DFTSP_LABELS = ("anti_min", "syn_min", "anti_mecp", "syn_mecp")
+
+
+def _seed_dft_sp_outputs(workspace: Path, molecule: str = "water_synthetic") -> None:
+    """Copy fixture orca.out files into workspace/dft_sp/<label>/."""
+    dft_fixture = fixture_molecule_dir(molecule) / "dft_sp"
+    for label in DFTSP_LABELS:
+        dest = workspace / "dft_sp" / label
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(dft_fixture / label / "orca.out", dest / "orca.out")
+
+
+def _manifest_with_crest_done(workspace: Path) -> dict:
+    """Build a manifest dict with crest done and 3 stub conformers per label.
+
+    Writes 3 dummy single-frame XYZ files per label under
+    workspace/crest/<label>/filtered/ so dft_sp.submit can concatenate them.
+    """
+    outputs: dict = {}
+    for label in DFTSP_LABELS:
+        confs = []
+        for i in range(3):
+            xyz_rel = f"crest/{label}/filtered/conf_{i}.xyz"
+            xyz_abs = workspace / xyz_rel
+            xyz_abs.parent.mkdir(parents=True, exist_ok=True)
+            xyz_abs.write_text(
+                "3\nconf\nO  0.0  0.0  0.0\nH  1.0  0.0  0.0\nH  0.0  1.0  0.0\n",
+                encoding="utf-8",
+            )
+            confs.append({"conf_id": i, "xyz": xyz_rel, "label": label})
+        outputs[label] = confs
+    return {
+        "smiles_input": "CCO",
+        "stages": {
+            "crest": {"status": "done", "outputs": outputs},
+            "dft_sp": {"status": "pending"},
+        },
+    }
+
+
+def test_cli_dft_sp_fails_when_manifest_missing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["dft_sp", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+def test_cli_dft_sp_fails_when_crest_not_done(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest = {"stages": {"crest": {"status": "submitted"}}}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    rc = main(["dft_sp", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "crest" in captured.err
+
+
+def test_cli_dft_sp_happy_path(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from spiropyran_dr.stages import dft_sp_stage
+
+    manifest = _manifest_with_crest_done(tmp_path)
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(dft_sp_stage, "submit_via_script", _fake_pbs_submitter("orca-pbs"))
+
+    rc = main(["dft_sp", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "status: submitted" in captured.out
+    for label in DFTSP_LABELS:
+        assert label in captured.out
+
+    stored = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    block = stored["stages"]["dft_sp"]
+    assert block["status"] == "submitted"
+    assert set(block["pbs_job_ids"].keys()) == set(DFTSP_LABELS)
+
+
+def test_cli_dft_sp_collect_fails_when_manifest_missing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["dft_sp_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+def test_cli_dft_sp_collect_fails_when_status_pending(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    manifest = {"stages": {"dft_sp": {"status": "pending"}}}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    rc = main(["dft_sp_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "pending" in captured.err
+
+
+def test_cli_dft_sp_collect_happy_path(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _manifest_with_crest_done(tmp_path)
+    manifest["stages"]["dft_sp"] = {
+        "status": "submitted",
+        "pbs_job_ids": {label: f"9{i}.meta-pbs" for i, label in enumerate(DFTSP_LABELS)},
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    _seed_dft_sp_outputs(tmp_path)
+
+    rc = main(["dft_sp_collect", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "status: done" in captured.out
+    for label in DFTSP_LABELS:
+        assert label in captured.out
+
+    stored = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    block = stored["stages"]["dft_sp"]
+    assert block["status"] == "done"
+    # pbs_job_ids from submit must survive the collect merge
+    assert set(block["pbs_job_ids"].keys()) == set(DFTSP_LABELS)
+    for label in DFTSP_LABELS:
+        entries = block["outputs"][label]
+        assert len(entries) == 3
+        assert all("energy_hartree" in e for e in entries)

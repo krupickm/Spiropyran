@@ -135,6 +135,27 @@ def write_xcontrol_distance_constraint(
     path.write_text(content, encoding="utf-8")
 
 
+def parse_orca_sp_energies(path: Path) -> list[float]:
+    """Return all final SCF energies from an ORCA single-point output file.
+
+    ORCA writes one ``FINAL SINGLE POINT ENERGY`` line per geometry when run
+    with a multi-frame XYZ input. Returns energies in the order they appear
+    (i.e. conformer order). Raises ``ValueError`` if no energy lines are found.
+    """
+    energies: list[float] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "FINAL SINGLE POINT ENERGY" in line:
+            energies.append(float(line.split()[-1]))
+    if not energies:
+        raise ValueError(f"{path}: no 'FINAL SINGLE POINT ENERGY' lines found")
+    return energies
+
+
+def check_orca_normal_termination(path: Path) -> bool:
+    """Return True if ``ORCA TERMINATED NORMALLY`` appears in the output file."""
+    return "ORCA TERMINATED NORMALLY" in path.read_text(encoding="utf-8")
+
+
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     """Atomically write JSON: tempfile in same dir, then os.replace.
 

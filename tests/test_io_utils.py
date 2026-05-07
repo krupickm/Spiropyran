@@ -9,7 +9,9 @@ from rdkit.Chem import AllChem
 
 from spiropyran_dr.io_utils import (
     atomic_write_json,
+    check_orca_normal_termination,
     parse_crest_energy_from_comment,
+    parse_orca_sp_energies,
     read_xyz,
     read_xyz_multiframe,
     write_xyz,
@@ -153,3 +155,52 @@ def test_write_xyz_from_arrays_rejects_length_mismatch(tmp_path: Path) -> None:
         write_xyz_from_arrays(
             tmp_path / "bad.xyz", ["O", "H"], [(0.0, 0.0, 0.0)], comment=""
         )
+
+
+# -- ORCA output parsers --------------------------------------------------
+
+_ORCA_SUCCESS = """\
+ORCA SCF DONE ...
+
+                         FINAL SINGLE POINT ENERGY       -76.400000000
+
+               FINAL SINGLE POINT ENERGY       -76.398000000
+
+FINAL SINGLE POINT ENERGY       -76.395000000
+
+****ORCA TERMINATED NORMALLY****
+"""
+
+_ORCA_FAILED = """\
+ORCA SCF DONE ...
+
+                         FINAL SINGLE POINT ENERGY       -76.400000000
+
+Error: SCF did not converge.
+"""
+
+
+def test_parse_orca_sp_energies_returns_all_in_order(tmp_path: Path) -> None:
+    src = tmp_path / "orca.out"
+    src.write_text(_ORCA_SUCCESS, encoding="utf-8")
+    energies = parse_orca_sp_energies(src)
+    assert energies == [-76.4, -76.398, -76.395]
+
+
+def test_parse_orca_sp_energies_raises_on_no_energy_lines(tmp_path: Path) -> None:
+    src = tmp_path / "orca.out"
+    src.write_text("no energy here\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="FINAL SINGLE POINT ENERGY"):
+        parse_orca_sp_energies(src)
+
+
+def test_check_orca_normal_termination_true(tmp_path: Path) -> None:
+    src = tmp_path / "orca.out"
+    src.write_text(_ORCA_SUCCESS, encoding="utf-8")
+    assert check_orca_normal_termination(src) is True
+
+
+def test_check_orca_normal_termination_false(tmp_path: Path) -> None:
+    src = tmp_path / "orca.out"
+    src.write_text(_ORCA_FAILED, encoding="utf-8")
+    assert check_orca_normal_termination(src) is False

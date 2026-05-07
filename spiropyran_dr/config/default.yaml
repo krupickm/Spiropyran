@@ -70,3 +70,33 @@ xtb_constr:
 crest:
   walltime_hours: 24
   script_path: "/storage/brno2/home/krupickm/bin/sub_crest.sh"
+
+# Stage 5 (dft_sp) submission. ORCA single-point at r2SCAN-3c level with CPCM
+# implicit solvation. One PBS job per label (4 labels) submitted via the
+# user-maintained `suborca.sh` wrapper:
+#   suborca.sh <input.inp> [walltime_hours]
+# Each job reads a multi-frame XYZ (all filtered CREST conformers for that
+# label) via `*xyzfile 0 1 conformers.xyz` and computes SP energies for every
+# frame sequentially. Solvation model is hardcoded to CPCM; solvent name comes
+# from `dft.solvent.name`.
+# - walltime_hours: int, 2nd positional arg to the wrapper (default 1 is
+#   sufficient for a single-point on a drug-sized molecule).
+# - script_path: absolute path to the wrapper on the cluster.
+# - ncpus: CPUs requested per job (ORCA scales to ~2 on this level of theory).
+# - mem_per_core_mb: memory per CPU in MB (2 × 4000 MB = 8 GB total).
+# - method: ORCA keyword for the composite method. r2SCAN-3c includes its own
+#   basis (def2-mTZVPP) and dispersion (D4); no separate basis/aux keywords.
+dft_sp:
+  walltime_hours: 1
+  script_path: "/storage/brno2/home/krupickm/bin/suborca.sh"
+  ncpus: 2
+  mem_per_core_mb: 4000
+  method: "r2SCAN-3c"
+
+dft:
+  solvent:
+    name: acetonitrile
+    # model is intentionally absent from dft_sp, which hardcodes CPCM (r2SCAN-3c
+    # was parametrized with CPCM). model will be consulted by dft_freq when that
+    # stage is implemented; add it here before dft_freq lands.
+    # model: SMD

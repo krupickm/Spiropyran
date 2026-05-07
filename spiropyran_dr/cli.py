@@ -8,7 +8,7 @@ from typing import Sequence
 
 from spiropyran_dr.config_utils import load_config
 from spiropyran_dr.io_utils import atomic_write_json
-from spiropyran_dr.stages import crest_stage, mm, prep, xtb_stage
+from spiropyran_dr.stages import crest_stage, dft_sp_stage, mm, prep, xtb_stage
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_ROOT / "config" / "default.yaml"
@@ -214,6 +214,54 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to pipeline config YAML.",
     )
     p_crest_collect.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full collect() return dict as JSON on stdout.",
+    )
+
+    p_dft_sp = sub.add_parser(
+        "dft_sp",
+        help="Submit dft_sp (stage 5) assuming crest_collect is already done. "
+        "Loads manifest.json from the workspace and submits 4 PBS jobs (one per label).",
+    )
+    p_dft_sp.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("./run_scratch"),
+        help="Workspace directory containing manifest.json.",
+    )
+    p_dft_sp.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Path to pipeline config YAML.",
+    )
+    p_dft_sp.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full submit() return dict as JSON on stdout.",
+    )
+
+    p_dft_sp_collect = sub.add_parser(
+        "dft_sp_collect",
+        help="Parse dft_sp ORCA outputs into manifest.json. Run after the four "
+        "dft_sp PBS jobs have finished on the cluster.",
+    )
+    p_dft_sp_collect.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("./run_scratch"),
+        help="Workspace directory containing manifest.json and dft_sp outputs.",
+    )
+    p_dft_sp_collect.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Path to pipeline config YAML.",
+    )
+    p_dft_sp_collect.add_argument(
         "--json",
         dest="as_json",
         action="store_true",
@@ -519,6 +567,100 @@ def _run_crest_collect(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "done" else 1
 
 
+def _run_dft_sp(args: argparse.Namespace) -> int:
+    if not _manifest_path(args.workspace).is_file():
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: manifest.json not found in {args.workspace}; "
+            "run crest_collect first",
+            file=sys.stderr,
+        )
+        return 1
+
+    manifest = _load_manifest(args.workspace)
+    crest_status = (manifest.get("stages") or {}).get("crest", {}).get("status")
+    if crest_status != "done":
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: crest stage is {crest_status!r}, must be 'done' before dft_sp",
+            file=sys.stderr,
+        )
+        return 1
+
+    config = load_config(args.config)
+    result = dft_sp_stage.submit(manifest, args.workspace, config)
+    manifest.setdefault("stages", {})["dft_sp"] = result
+    _save_manifest(args.workspace, manifest)
+
+    if args.as_json:
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        if result["status"] == "submitted":
+            print("status: submitted")
+            for label, jobid in result["pbs_job_ids"].items():
+                print(f"{label} jobid: {jobid}")
+            print(f"work_dirs: {args.workspace / 'dft_sp'}")
+        else:
+            print("status: failed", file=sys.stderr)
+            print(
+                f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr
+            )
+
+    return 0 if result["status"] == "submitted" else 1
+
+
+def _run_dft_sp_collect(args: argparse.Namespace) -> int:
+    if not _manifest_path(args.workspace).is_file():
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: manifest.json not found in {args.workspace}; run dft_sp first",
+            file=sys.stderr,
+        )
+        return 1
+
+    manifest = _load_manifest(args.workspace)
+    stages = manifest.setdefault("stages", {})
+    dft_sp_block = stages.get("dft_sp") or {}
+    dft_sp_status = dft_sp_block.get("status")
+    if dft_sp_status not in ("submitted", "done"):
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: dft_sp stage is {dft_sp_status!r}, must be 'submitted' "
+            "or 'done' before dft_sp_collect",
+            file=sys.stderr,
+        )
+        return 1
+
+    config = load_config(args.config)
+    result = dft_sp_stage.collect(manifest, args.workspace, config)
+    dft_sp_block.update(result)
+    stages["dft_sp"] = dft_sp_block
+    _save_manifest(args.workspace, manifest)
+
+    if args.as_json:
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    else:
+        if result["status"] == "done":
+            outputs = result["outputs"]
+            print("status: done")
+            print(f"  {'label':<10}  {'n_conf':>6}  {'lowest E (Eh)':>16}")
+            for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+                entries = outputs.get(label) or []
+                if not entries:
+                    continue
+                e_lowest = float(entries[0]["energy_hartree"])
+                print(f"  {label:<10}  {len(entries):>6d}  {e_lowest:>16.8f}")
+        else:
+            print("status: failed", file=sys.stderr)
+            print(
+                f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr
+            )
+
+    return 0 if result["status"] == "done" else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -534,5 +676,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_crest_resume(args)
     if args.command == "crest_collect":
         return _run_crest_collect(args)
+    if args.command == "dft_sp":
+        return _run_dft_sp(args)
+    if args.command == "dft_sp_collect":
+        return _run_dft_sp_collect(args)
     parser.error(f"unknown command: {args.command}")
     return 2
