@@ -6,25 +6,24 @@ _min labels run unconstrained CREST, seeded from the lowest MM conformer.
 _mecp labels run under a C-O distance constraint (written as .xcontrol),
 seeded from the xtb_constr output for that base diastereomer.
 
-After collect(), conformers are re-classified by the signed labelling
-dihedral chromene_O - C_spiro - indoline_N - anchor (same convention as
-mm.label_conformer). Conformers from both jobs within a pair type (min or
-mecp) are pooled, sorted by energy, and split according to the geometric
-label. This corrects for CREST breaking the spiro C-O bond and sampling
-across the syn/anti barrier.
+After collect(), conformers are re-classified by the signed dihedral
+gem_C - spiro_C - indoline_N - chromene_O (positive => anti, same
+sign convention as mm.label_conformer). All four atom indices are read
+directly from prep.outputs. Conformers from both jobs within a pair type
+(min or mecp) are pooled, sorted by energy, and split according to the
+geometric label. This corrects for CREST breaking the spiro C-O bond and
+sampling across the syn/anti barrier.
 
 See project.md section 10.4.
 """
 
 from __future__ import annotations
 
+import math
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
-
-from rdkit import Chem
-from rdkit.Chem import AllChem
 
 from spiropyran_dr.io_utils import (
     parse_crest_energy_from_comment,
@@ -37,7 +36,6 @@ from spiropyran_dr.pbs_utils import (
     submit_via_script,
     write_jobid,
 )
-from spiropyran_dr.stages.mm import indoline_ring_atom_indices, label_conformer
 
 LABELS: tuple[str, str, str, str] = ("anti_min", "syn_min", "anti_mecp", "syn_mecp")
 
@@ -80,49 +78,70 @@ def _lowest_energy_mm_xyz(mm_outputs: dict[str, Any], base: str) -> str | None:
 # -- geometric labeller ---------------------------------------------------
 
 
+def _dihedral_deg(
+    p1: tuple[float, float, float],
+    p2: tuple[float, float, float],
+    p3: tuple[float, float, float],
+    p4: tuple[float, float, float],
+) -> float:
+    """Signed dihedral angle (degrees) of four points; standard atan2 form."""
+    b1 = (p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2])
+    b2 = (p3[0] - p2[0], p3[1] - p2[1], p3[2] - p2[2])
+    b3 = (p4[0] - p3[0], p4[1] - p3[1], p4[2] - p3[2])
+    n1 = (
+        b1[1] * b2[2] - b1[2] * b2[1],
+        b1[2] * b2[0] - b1[0] * b2[2],
+        b1[0] * b2[1] - b1[1] * b2[0],
+    )
+    n2 = (
+        b2[1] * b3[2] - b2[2] * b3[1],
+        b2[2] * b3[0] - b2[0] * b3[2],
+        b2[0] * b3[1] - b2[1] * b3[0],
+    )
+    b2_len = math.sqrt(b2[0] ** 2 + b2[1] ** 2 + b2[2] ** 2)
+    m1 = (
+        n1[1] * b2[2] / b2_len - n1[2] * b2[1] / b2_len,
+        n1[2] * b2[0] / b2_len - n1[0] * b2[2] / b2_len,
+        n1[0] * b2[1] / b2_len - n1[1] * b2[0] / b2_len,
+    )
+    x = n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]
+    y = m1[0] * n2[0] + m1[1] * n2[1] + m1[2] * n2[2]
+    return math.degrees(math.atan2(y, x))
+
+
 def _build_geo_labeller(
     manifest: dict[str, Any],
 ) -> Callable[[list[str], list[tuple[float, float, float]]], str] | None:
     """Build a callable (symbols, coords) -> "anti"|"syn" from prep outputs.
 
-    Uses mm.label_conformer with the same dihedral convention (chromene_O -
-    C_spiro - indoline_N - anchor, positive => anti). Returns None when the
-    required prep outputs are absent, in which case callers fall back to
-    assigning geo_label from the job name.
+    Computes the signed dihedral gem_C - spiro_C - indoline_N - chromene_O
+    using the four atom indices from prep.outputs. Sign convention is
+    positive => "anti", negative => "syn", matching mm.label_conformer.
+    Atom-order note: gem_C and the indoline aromatic anchor (used by
+    mm.label_conformer as the fourth atom) sit on opposite faces of the
+    spiro-C sp3 centre, so swapping anchor for gem_C while keeping the
+    same dihedral order would flip the sign; placing gem_C as the FIRST
+    atom (and chromene_O as the FOURTH) restores the original sign.
+
+    Returns None if any of the four prep outputs is absent; callers then
+    fall back to deriving geo_label from the job name.
     """
     prep_out = (manifest.get("stages") or {}).get("prep", {}).get("outputs") or {}
-    smiles = prep_out.get("smiles_canonical")
-    spiro_idx = prep_out.get("spiro_carbon_idx")
-    chromene_o_idx = prep_out.get("chromene_oxygen_idx")
-    indoline_n_idx = prep_out.get("indoline_nitrogen_idx")
-
-    if any(v is None for v in (smiles, spiro_idx, chromene_o_idx, indoline_n_idx)):
+    keys = (
+        "gem_carbon_idx",
+        "spiro_carbon_idx",
+        "indoline_nitrogen_idx",
+        "chromene_oxygen_idx",
+    )
+    if any(prep_out.get(k) is None for k in keys):
         return None
-
-    spiro_idx = int(spiro_idx)
-    chromene_o_idx = int(chromene_o_idx)
-    indoline_n_idx = int(indoline_n_idx)
-
-    mol_tpl = AllChem.AddHs(Chem.MolFromSmiles(smiles))
-    indoline_ring = indoline_ring_atom_indices(mol_tpl, spiro_idx, indoline_n_idx)
-    n_atoms = mol_tpl.GetNumAtoms()
+    g, s, n, o = (int(prep_out[k]) for k in keys)
 
     def _label(
         symbols: list[str], coords: list[tuple[float, float, float]]
     ) -> str:
-        conf = Chem.Conformer(n_atoms)
-        for i, (x, y, z) in enumerate(coords):
-            conf.SetAtomPosition(i, (x, y, z))
-        mol = Chem.RWMol(mol_tpl)
-        cid = mol.AddConformer(conf, assignId=True)
-        return label_conformer(
-            mol.GetMol(),
-            cid,
-            indoline_ring,
-            spiro_idx,
-            indoline_n_idx,
-            chromene_o_idx,
-        )
+        angle_deg = _dihedral_deg(coords[g], coords[s], coords[n], coords[o])
+        return "anti" if angle_deg > 0.0 else "syn"
 
     return _label
 

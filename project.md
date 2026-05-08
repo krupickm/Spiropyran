@@ -774,14 +774,19 @@ seed source and constraint state.
      the spiro C–O barrier, so the job that was seeded as "anti" may
      produce geometrically syn conformers and vice versa.
   3. **Geometric re-labelling**: for each conformer in each pool, compute
-     the signed dihedral `chromene_O – C_spiro – indoline_N – anchor`
-     using the atom indices from `prep.outputs` and the same sign
-     convention as §10.2 (positive → `anti`, negative → `syn`). This
-     assigns a `geo_label` field to every conformer. Requires
-     `prep.outputs.smiles_canonical`, `spiro_carbon_idx`,
-     `chromene_oxygen_idx`, and `indoline_nitrogen_idx` to be present; if
-     any is absent the stage falls back to deriving `geo_label` from the
-     job name (e.g. `anti_min` → `anti`) without pooling.
+     the signed dihedral `gem_C – C_spiro – indoline_N – chromene_O`
+     using the four atom indices from `prep.outputs` directly (no SMILES
+     parsing, no ring-topology lookup). Sign convention: positive →
+     `anti`, negative → `syn` — matches §10.2 because gem_C and the
+     indoline aromatic anchor sit on opposite faces of the spiro-C sp3
+     centre, so placing gem_C as the first dihedral atom (and chromene_O
+     as the fourth) reproduces the §10.2 sign that uses the anchor as
+     the fourth atom. This assigns a `geo_label` field to every
+     conformer. Requires `prep.outputs.gem_carbon_idx`,
+     `spiro_carbon_idx`, `indoline_nitrogen_idx`, and
+     `chromene_oxygen_idx` to be present; if any is absent the stage
+     falls back to deriving `geo_label` from the job name (e.g.
+     `anti_min` → `anti`) without pooling.
   4. **Cap and write**: within each pool, sort by energy ascending, then
      partition into `anti` and `syn` sub-lists. Take up to
      `ensemble.max_conformers_per_diastereomer` from each sub-list (no

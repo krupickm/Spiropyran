@@ -1,24 +1,17 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pytest
-from rdkit import Chem
-from rdkit.Chem import AllChem
 
 from spiropyran_dr import pbs_utils
-from spiropyran_dr.config_utils import load_config
+from spiropyran_dr.io_utils import read_xyz_multiframe
 from spiropyran_dr.pbs_utils import PBSSubmitError
 from spiropyran_dr.stages import crest_stage
-from spiropyran_dr.stages import prep as prep_stage
 from spiropyran_dr.stages.base import Stage
-from spiropyran_dr.stages.mm import (
-    indoline_ring_atom_indices,
-    label_conformer,
-)
 
 from conftest import fixture_molecule_dir, fixture_molecule_names
 
@@ -550,135 +543,79 @@ def test_collect_succeeds_for_all_fixture_molecules(
 # -- geometric re-labelling ---------------------------------------------------
 
 
-def _single_frame_xyz(
-    symbols: list[str],
-    coords: list[tuple[float, float, float]],
-    energy: float,
-) -> str:
-    """Return a single-frame XYZ string in CREST crest_conformers.xyz format."""
-    lines = [str(len(symbols)), f"        {energy:.8f}"]
-    for sym, (x, y, z) in zip(symbols, coords):
-        lines.append(f" {sym}  {x:.10f}  {y:.10f}  {z:.10f}")
-    return "\n".join(lines) + "\n"
+# Reference labels for benzylSP CREST input frames, in the order they appear
+# in crest_conformers.xyz. Hand-checked via the signed dihedral
+# gem_C - spiro_C - indoline_N - chromene_O on the real fixture geometries
+# (atom indices from the recorded prep outputs in manifest.json). Pooling
+# these 40 frames and partitioning by geo_label reproduces 14 anti + 26 syn,
+# which after the syn cap of 20 yields the manifest's recorded 14 anti_mecp
+# + 20 syn_mecp output entries.
+_BENZYLSP_GEO_LABELS: dict[str, list[str]] = {
+    "anti_mecp": [
+        "syn", "syn", "syn", "syn", "syn", "anti", "syn", "syn",
+        "anti", "syn", "anti", "anti", "syn", "anti", "anti",
+        "syn", "syn", "syn", "syn", "syn", "syn",
+    ],
+    "syn_mecp": [
+        "syn", "syn", "syn", "syn", "syn", "anti", "syn", "syn",
+        "syn", "anti", "anti", "anti", "anti", "syn", "syn",
+        "syn", "anti", "anti", "anti",
+    ],
+}
 
 
-def test_collect_reclassifies_conformers_by_dihedral(
-    tmp_path: Path,
-    bips_smiles: str,
-    default_config_path: Path,
-    smarts_config_path: Path,
-) -> None:
-    """Conformers seeded to the wrong-label job are re-assigned by dihedral.
+def test_geo_labeller_classifies_benzylsp_fixture_frames() -> None:
+    """Labeller built from real prep outputs reproduces hand-curated labels.
 
-    Both anti_min and syn_min receive the same two-frame XYZ (one frame
-    geometrically anti, one geometrically syn).  After collect() with full
-    prep outputs, each output slot must contain only the geometrically correct
-    conformer.
+    Uses the committed manifest.json for benzylSP (whose prep.outputs hold
+    spiro_carbon_idx, gem_carbon_idx, indoline_nitrogen_idx,
+    chromene_oxygen_idx) plus the fixture crest_conformers.xyz files for
+    the _mecp pair. No SMILES, RDKit, or topology lookup needed.
     """
-    cfg = load_config(default_config_path)
-    cfg["paths"] = {"smarts": str(smarts_config_path)}
-    prep_ws = tmp_path / "prep_ws"
-    prep_ws.mkdir()
-    prep_result = prep_stage.submit(
-        {"smiles_input": bips_smiles, "stages": {}}, prep_ws, cfg
-    )
-    assert prep_result["status"] == "done", prep_result
-    prep_out = prep_result["outputs"]
-    smiles_canonical = prep_out["smiles_canonical"]
-    spiro_idx = prep_out["spiro_carbon_idx"]
-    chromene_o_idx = prep_out["chromene_oxygen_idx"]
-    indoline_n_idx = prep_out["indoline_nitrogen_idx"]
+    fixture = fixture_molecule_dir("benzylSP")
+    manifest = json.loads((fixture / "manifest.json").read_text(encoding="utf-8"))
+    labeller = crest_stage._build_geo_labeller(manifest)
+    assert labeller is not None
 
-    # Embed one BIPS conformer; determine its geometric label.
-    mol_h = Chem.AddHs(Chem.MolFromSmiles(smiles_canonical))
-    params = AllChem.ETKDGv3()
-    params.randomSeed = 11
-    assert AllChem.EmbedMolecule(mol_h, params) == 0
-
-    ring = indoline_ring_atom_indices(mol_h, spiro_idx, indoline_n_idx)
-    label_orig = label_conformer(mol_h, 0, ring, spiro_idx, indoline_n_idx, chromene_o_idx)
-
-    conf = mol_h.GetConformer(0)
-    n_atoms = mol_h.GetNumAtoms()
-    symbols = [mol_h.GetAtomWithIdx(i).GetSymbol() for i in range(n_atoms)]
-    orig_coords = [
-        (conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y, conf.GetAtomPosition(i).z)
-        for i in range(n_atoms)
-    ]
-
-    # Mirror chromene O across the indoline ring plane to flip the label.
-    ring_xyz = np.array(
-        [[conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y, conf.GetAtomPosition(i).z]
-         for i in ring]
-    )
-    centroid = ring_xyz.mean(axis=0)
-    _, _, vh = np.linalg.svd(ring_xyz - centroid, full_matrices=False)
-    normal = vh[-1]
-    o_pos = np.array(orig_coords[chromene_o_idx])
-    proj = (o_pos - centroid).dot(normal)
-    new_o = o_pos - 2.0 * proj * normal
-
-    mirrored_coords = list(orig_coords)
-    mirrored_coords[chromene_o_idx] = (float(new_o[0]), float(new_o[1]), float(new_o[2]))
-
-    # Confirm the mirror actually flipped the label.
-    conf.SetAtomPosition(chromene_o_idx, mirrored_coords[chromene_o_idx])
-    label_mirrored = label_conformer(mol_h, 0, ring, spiro_idx, indoline_n_idx, chromene_o_idx)
-    assert {label_orig, label_mirrored} == {"anti", "syn"}
-
-    # Identify which set of coords is anti and which is syn.
-    anti_coords = orig_coords if label_orig == "anti" else mirrored_coords
-    syn_coords = mirrored_coords if label_orig == "anti" else orig_coords
-
-    # WRONG seeding: each job dir receives the opposite-label geometry.
-    # anti_min / anti_mecp get a syn-geometry conformer (lower energy to be
-    # the "lowest" in its job file); syn_min / syn_mecp get anti-geometry.
-    # After geometric re-labelling the pool is split correctly regardless.
-    for label in ("anti_min", "anti_mecp"):
-        d = tmp_path / "crest" / label
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "crest_conformers.xyz").write_text(
-            _single_frame_xyz(symbols, syn_coords, -99.0), encoding="utf-8"
+    for crest_label, expected in _BENZYLSP_GEO_LABELS.items():
+        frames = read_xyz_multiframe(
+            fixture / "crest" / crest_label / "crest_conformers.xyz"
         )
-    for label in ("syn_min", "syn_mecp"):
-        d = tmp_path / "crest" / label
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "crest_conformers.xyz").write_text(
-            _single_frame_xyz(symbols, anti_coords, -100.0), encoding="utf-8"
-        )
+        assert len(frames) == len(expected)
+        actual = [labeller(sym, coords) for sym, coords, _ in frames]
+        assert actual == expected, f"{crest_label}: {actual}"
 
-    manifest = {
-        "stages": {
-            "prep": {
-                "status": "done",
-                "outputs": {
-                    "smiles_canonical": smiles_canonical,
-                    "spiro_carbon_idx": spiro_idx,
-                    "chromene_oxygen_idx": chromene_o_idx,
-                    "indoline_nitrogen_idx": indoline_n_idx,
-                },
-            }
-        }
-    }
+
+def test_collect_reproduces_benzylsp_manifest_mecp_outputs(tmp_path: Path) -> None:
+    """End-to-end: collect() on the benzylSP fixture matches the recorded manifest.
+
+    The fixture only ships _mecp xyz files, so anti_min/syn_min slots are
+    populated by mirroring anti_mecp data (only the _mecp output is asserted).
+    """
+    fixture = fixture_molecule_dir("benzylSP")
+    manifest = json.loads((fixture / "manifest.json").read_text(encoding="utf-8"))
+
+    fallback_src = fixture / "crest" / "anti_mecp" / "crest_conformers.xyz"
+    for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+        src_label = label if label.endswith("_mecp") else None
+        src = (fixture / "crest" / src_label / "crest_conformers.xyz") if src_label else fallback_src
+        dest = tmp_path / "crest" / label
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest / "crest_conformers.xyz")
+
     result = crest_stage.collect(manifest, tmp_path, _config())
     assert result["status"] == "done", result
 
-    # Each output slot must contain only conformers with the matching geo_label.
-    for out_label, expected_geo in (
-        ("anti_min", "anti"),
-        ("syn_min", "syn"),
-        ("anti_mecp", "anti"),
-        ("syn_mecp", "syn"),
-    ):
-        entries = result["outputs"][out_label]
-        assert len(entries) == 1, f"{out_label}: expected 1 conformer, got {len(entries)}"
-        assert entries[0]["geo_label"] == expected_geo, out_label
-        assert entries[0]["label"] == out_label
-
-    # geo_label must be present on all entries (both paths).
-    for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
-        for entry in result["outputs"][label]:
-            assert "geo_label" in entry
+    expected = manifest["stages"]["crest"]["outputs"]
+    for label in ("anti_mecp", "syn_mecp"):
+        actual_entries = result["outputs"][label]
+        expected_entries = expected[label]
+        assert len(actual_entries) == len(expected_entries), label
+        for got, want in zip(actual_entries, expected_entries):
+            assert got["geo_label"] == want["geo_label"]
+            assert got["energy_hartree"] == pytest.approx(
+                want["energy_hartree"], abs=1e-8
+            )
 
 
 # -- fallback path: geo_label present even without prep outputs ---------------
