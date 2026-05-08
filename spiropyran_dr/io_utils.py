@@ -151,6 +151,24 @@ def parse_orca_sp_energies(path: Path) -> list[float]:
     return energies
 
 
+def parse_orca_sp_energy(path: Path) -> float:
+    """Return the single SP energy from a per-conformer ORCA output file.
+
+    Used by dft_sp where each ORCA job runs on exactly one geometry, so we
+    expect exactly one ``FINAL SINGLE POINT ENERGY`` line. Zero or more than
+    one is an error: more than one means a multi-frame XYZ slipped through,
+    which would reuse the previous geometry's SCF guess and silently corrupt
+    energies for chemically distinct conformers.
+    """
+    energies = parse_orca_sp_energies(path)
+    if len(energies) != 1:
+        raise ValueError(
+            f"{path}: expected exactly one 'FINAL SINGLE POINT ENERGY' line, "
+            f"found {len(energies)}"
+        )
+    return energies[0]
+
+
 def check_orca_normal_termination(path: Path) -> bool:
     """Return True if ``ORCA TERMINATED NORMALLY`` appears in the output file."""
     return "ORCA TERMINATED NORMALLY" in path.read_text(encoding="utf-8")

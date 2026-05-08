@@ -1,23 +1,25 @@
 """Stage 5: ORCA single-point energies at r2SCAN-3c/CPCM level.
 
-One PBS job per label (anti_min, syn_min, anti_mecp, syn_mecp). Each job
-receives a multi-frame XYZ of the filtered CREST conformers and computes SP
-energies sequentially via ORCA's *xyzfile directive. Submitted via the
-user-maintained suborca.sh wrapper.
+One PBS job per conformer per label (4 labels x N conformers, typically up to
+4 x 20 = 80 jobs per molecule). Each job runs ORCA on a single geometry so
+the SCF guess starts from scratch -- a multi-frame *xyzfile job reuses the
+previous frame's MOs as the next guess, which silently corrupts energies for
+chemically distinct conformers. Submitted via the user-maintained
+suborca.sh wrapper.
 
 See project.md section 10.5.
 """
 
 from __future__ import annotations
 
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from spiropyran_dr.io_utils import (
     check_orca_normal_termination,
-    parse_orca_sp_energies,
-    read_xyz,
+    parse_orca_sp_energy,
 )
 from spiropyran_dr.pbs_utils import (
     PBSSubmitError,
@@ -36,21 +38,12 @@ def _label_dir(workspace: Path, label: str) -> Path:
     return workspace / "dft_sp" / label
 
 
-def _concatenate_xyz(src_paths: list[str | Path], dest: Path) -> None:
-    """Concatenate individual XYZ files into one multi-frame file.
+def _conf_dir(workspace: Path, label: str, conf_id: int) -> Path:
+    return _label_dir(workspace, label) / f"conf_{conf_id}"
 
-    Each source is a single-frame XYZ. The frames are appended in order;
-    the comment line from each source frame is preserved verbatim.
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    lines: list[str] = []
-    for p in src_paths:
-        symbols, coords, comment = read_xyz(Path(p))
-        lines.append(str(len(symbols)))
-        lines.append(comment)
-        for sym, (x, y, z) in zip(symbols, coords):
-            lines.append(f"{sym} {x:.8f} {y:.8f} {z:.8f}")
-    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+def _job_key(label: str, conf_id: int) -> str:
+    return f"{label}/{conf_id}"
 
 
 def _write_orca_inp(
@@ -103,38 +96,41 @@ def submit(
 
     for label in LABELS:
         conformers = crest_outputs[label]
-        label_dir = _label_dir(workspace, label)
-        label_dir.mkdir(parents=True, exist_ok=True)
+        for conf in conformers:
+            conf_id = int(conf["conf_id"])
+            src_xyz = Path(conf["xyz"])
+            if not src_xyz.is_absolute():
+                src_xyz = workspace / src_xyz
 
-        xyz_paths = [c["xyz"] for c in conformers]
-        # Resolve paths relative to workspace if not absolute.
-        abs_xyz_paths = [
-            p if Path(p).is_absolute() else workspace / p for p in xyz_paths
-        ]
-        conformers_xyz = label_dir / "conformers.xyz"
-        _concatenate_xyz(abs_xyz_paths, conformers_xyz)
+            conf_dir = _conf_dir(workspace, label, conf_id)
+            conf_dir.mkdir(parents=True, exist_ok=True)
 
-        orca_inp = label_dir / "orca.inp"
-        _write_orca_inp(
-            orca_inp, method, solvent_name, ncpus, mem_per_core_mb, "conformers.xyz"
-        )
+            xyz_filename = f"conf_{conf_id}.xyz"
+            shutil.copyfile(src_xyz, conf_dir / xyz_filename)
 
-        try:
-            jobid, _ = submit_via_script(
-                script_path,
-                ["orca.inp", str(walltime_hours)],
-                cwd=label_dir,
+            orca_inp = conf_dir / "orca.inp"
+            _write_orca_inp(
+                orca_inp, method, solvent_name, ncpus, mem_per_core_mb, xyz_filename
             )
-        except PBSSubmitError as exc:
-            return {
-                "status": "failed",
-                "started_at": started_at,
-                "finished_at": _now_iso(),
-                "failure_reason": f"submission failed for label {label!r}: {exc}",
-            }
 
-        write_jobid(label_dir / "jobid", jobid)
-        pbs_job_ids[label] = jobid
+            try:
+                jobid, _ = submit_via_script(
+                    script_path,
+                    ["orca.inp", str(walltime_hours)],
+                    cwd=conf_dir,
+                )
+            except PBSSubmitError as exc:
+                return {
+                    "status": "failed",
+                    "started_at": started_at,
+                    "finished_at": _now_iso(),
+                    "failure_reason": (
+                        f"submission failed for {_job_key(label, conf_id)!r}: {exc}"
+                    ),
+                }
+
+            write_jobid(conf_dir / "jobid", jobid)
+            pbs_job_ids[_job_key(label, conf_id)] = jobid
 
     return {
         "status": "submitted",
@@ -151,53 +147,46 @@ def collect(
     outputs: dict[str, list[dict[str, Any]]] = {}
 
     for label in LABELS:
-        label_dir = _label_dir(workspace, label)
-        orca_out = label_dir / "orca.out"
-
-        if not orca_out.exists():
-            return {
-                "status": "failed",
-                "finished_at": _now_iso(),
-                "failure_reason": f"orca.out missing for label {label!r}: {orca_out}",
-            }
-
-        if not check_orca_normal_termination(orca_out):
-            return {
-                "status": "failed",
-                "finished_at": _now_iso(),
-                "failure_reason": f"ORCA did not terminate normally for label {label!r}",
-            }
-
-        try:
-            energies = parse_orca_sp_energies(orca_out)
-        except ValueError as exc:
-            return {
-                "status": "failed",
-                "finished_at": _now_iso(),
-                "failure_reason": str(exc),
-            }
-
         conformers = crest_outputs[label]
-        if len(energies) != len(conformers):
-            return {
-                "status": "failed",
-                "finished_at": _now_iso(),
-                "failure_reason": (
-                    f"energy count mismatch for label {label!r}: "
-                    f"ORCA reported {len(energies)} energies but "
-                    f"{len(conformers)} conformers were submitted"
-                ),
-            }
+        label_entries: list[dict[str, Any]] = []
+        for conf in conformers:
+            conf_id = int(conf["conf_id"])
+            key = _job_key(label, conf_id)
+            orca_out = _conf_dir(workspace, label, conf_id) / "orca.out"
 
-        outputs[label] = [
-            {
-                "conf_id": c["conf_id"],
-                "xyz": c["xyz"],
-                "energy_hartree": e,
-                "label": label,
-            }
-            for c, e in zip(conformers, energies)
-        ]
+            if not orca_out.exists():
+                return {
+                    "status": "failed",
+                    "finished_at": _now_iso(),
+                    "failure_reason": f"orca.out missing for {key!r}: {orca_out}",
+                }
+
+            if not check_orca_normal_termination(orca_out):
+                return {
+                    "status": "failed",
+                    "finished_at": _now_iso(),
+                    "failure_reason": (f"ORCA did not terminate normally for {key!r}"),
+                }
+
+            try:
+                energy = parse_orca_sp_energy(orca_out)
+            except ValueError as exc:
+                return {
+                    "status": "failed",
+                    "finished_at": _now_iso(),
+                    "failure_reason": f"{key!r}: {exc}",
+                }
+
+            label_entries.append(
+                {
+                    "conf_id": conf_id,
+                    "xyz": conf["xyz"],
+                    "energy_hartree": energy,
+                    "label": label,
+                }
+            )
+
+        outputs[label] = label_entries
 
     return {
         "status": "done",

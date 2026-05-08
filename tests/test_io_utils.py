@@ -12,6 +12,7 @@ from spiropyran_dr.io_utils import (
     check_orca_normal_termination,
     parse_crest_energy_from_comment,
     parse_orca_sp_energies,
+    parse_orca_sp_energy,
     read_xyz,
     read_xyz_multiframe,
     write_xyz,
@@ -192,6 +193,32 @@ def test_parse_orca_sp_energies_raises_on_no_energy_lines(tmp_path: Path) -> Non
     src.write_text("no energy here\n", encoding="utf-8")
     with pytest.raises(ValueError, match="FINAL SINGLE POINT ENERGY"):
         parse_orca_sp_energies(src)
+
+
+def test_parse_orca_sp_energy_returns_single_value(tmp_path: Path) -> None:
+    src = tmp_path / "orca.out"
+    src.write_text(
+        "FINAL SINGLE POINT ENERGY       -76.400000000\n"
+        "****ORCA TERMINATED NORMALLY****\n",
+        encoding="utf-8",
+    )
+    assert parse_orca_sp_energy(src) == -76.4
+
+
+def test_parse_orca_sp_energy_raises_on_no_energy(tmp_path: Path) -> None:
+    src = tmp_path / "orca.out"
+    src.write_text("nothing here\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="FINAL SINGLE POINT ENERGY"):
+        parse_orca_sp_energy(src)
+
+
+def test_parse_orca_sp_energy_raises_on_multi_energy(tmp_path: Path) -> None:
+    # Per-conformer ORCA outputs must contain exactly one SP energy. More than
+    # one indicates a multi-frame XYZ regression and should be rejected loudly.
+    src = tmp_path / "orca.out"
+    src.write_text(_ORCA_SUCCESS, encoding="utf-8")
+    with pytest.raises(ValueError, match="expected exactly one"):
+        parse_orca_sp_energy(src)
 
 
 def test_check_orca_normal_termination_true(tmp_path: Path) -> None:

@@ -254,7 +254,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_dft_sp = sub.add_parser(
         "dft_sp",
         help="Submit dft_sp (stage 5) assuming crest_collect is already done. "
-        "Loads manifest.json from the workspace and submits 4 PBS jobs (one per label).",
+        "Loads manifest.json from the workspace and submits one ORCA PBS job "
+        "per conformer per label (4 x N jobs total).",
     )
     p_dft_sp.add_argument(
         "--workspace",
@@ -277,8 +278,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_dft_sp_collect = sub.add_parser(
         "dft_sp_collect",
-        help="Parse dft_sp ORCA outputs into manifest.json. Run after the four "
-        "dft_sp PBS jobs have finished on the cluster.",
+        help="Parse dft_sp ORCA outputs into manifest.json. Run after the "
+        "per-conformer dft_sp PBS jobs have finished on the cluster.",
     )
     p_dft_sp_collect.add_argument(
         "--workspace",
@@ -726,8 +727,21 @@ def _run_dft_sp(args: argparse.Namespace) -> int:
     else:
         if result["status"] == "submitted":
             print("status: submitted")
-            for label, jobid in result["pbs_job_ids"].items():
-                print(f"{label} jobid: {jobid}")
+            # Job-ids are keyed by f"{label}/{conf_id}" -- collapse to per-label
+            # counts so a 4 x 20 conformer molecule does not dump 80 lines.
+            pbs_job_ids = result["pbs_job_ids"]
+            per_label: dict[str, list[str]] = {}
+            for key, jobid in pbs_job_ids.items():
+                lbl = key.split("/", 1)[0]
+                per_label.setdefault(lbl, []).append(jobid)
+            for lbl in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+                ids = per_label.get(lbl, [])
+                if not ids:
+                    continue
+                if len(ids) == 1:
+                    print(f"{lbl}: 1 job ({ids[0]})")
+                else:
+                    print(f"{lbl}: {len(ids)} jobs ({ids[0]} ... {ids[-1]})")
             print(f"work_dirs: {args.workspace / 'dft_sp'}")
         else:
             print("status: failed", file=sys.stderr)
@@ -946,7 +960,12 @@ def _run_status(args: argparse.Namespace) -> int:
             or "-"
         )
         pbs_ids = block.get("pbs_job_ids", {})
-        ids_str = "  ".join(f"{k}={v}" for k, v in pbs_ids.items()) if pbs_ids else "-"
+        if not pbs_ids:
+            ids_str = "-"
+        elif len(pbs_ids) > 8:
+            ids_str = f"{len(pbs_ids)} jobs"
+        else:
+            ids_str = "  ".join(f"{k}={v}" for k, v in pbs_ids.items())
         print(f"  {stage_name:<14}  {status:<12}  {updated:<26}  {ids_str}")
 
     return 0

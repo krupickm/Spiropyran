@@ -88,8 +88,10 @@ SMILES (one molecule)
                                    through sub_crest.sh as `--cinp .xcontrol`.
     ▼
 [5] dft_sp          PBS        ORCA single point: r2SCAN-3c/CPCM. One job per
-                               label (4 labels); each job processes all filtered
-                               conformers via multi-frame XYZ input.
+                               conformer per label (4 × N jobs total); each
+                               job runs ORCA on a single geometry so the SCF
+                               guess starts from scratch (avoiding orbital
+                               reuse across chemically distinct conformers).
     ▼
 [6] dft_freq        PBS        OPTIONAL: ORCA frequency calc at the (constrained
                                or unconstrained) CREST geometry → thermal
@@ -148,8 +150,10 @@ success vs failure. Concretely:
   fails if the measured C-O distance is outside the tolerance window.
 - **crest** `collect()`: requires `crest_conformers.xyz` in every label
   directory; fails if any is absent.
-- **dft_sp** `collect()`: requires `ORCA TERMINATED NORMALLY` in `orca.out`
-  and the correct count of `FINAL SINGLE POINT ENERGY` lines per label.
+- **dft_sp** `collect()`: for each conformer of each label, requires
+  `ORCA TERMINATED NORMALLY` in its `orca.out` and exactly one
+  `FINAL SINGLE POINT ENERGY` line in that file (more than one would
+  indicate a multi-frame regression).
 
 ### 3.2 Module loading
 
@@ -181,10 +185,13 @@ def submit(manifest: dict, workspace: Path, config: dict) -> dict:
         submitted_at. Stages that submit a fixed number of jobs keyed by
         label key by that label string -- xtb_constr by base diastereomer
         ('anti', 'syn'); crest by the four label scheme ('anti_min',
-        'syn_min', 'anti_mecp', 'syn_mecp'); dft_sp and dft_freq also by
-        label string (one job per label, multi-frame XYZ input). Per-job
-        work directories are derivable from the workspace and stage
-        conventions; they are not stored in the manifest.
+        'syn_min', 'anti_mecp', 'syn_mecp'). dft_sp submits one job per
+        conformer per label and keys by the composite string
+        f"{label}/{conf_id}" (e.g. 'anti_min/0', 'anti_min/1', ...);
+        dft_freq is expected to follow the same per-conformer convention
+        when implemented. Per-job work directories are derivable from the
+        workspace and stage conventions; they are not stored in the
+        manifest.
       - For local stages: outputs (stage-specific dict), finished_at
       - For status=='failed': failure_reason (str), finished_at
     """
@@ -259,10 +266,12 @@ one orchestrator job = one molecule).
                      "submitted_at": "..." },
     "dft_sp":      { "status": "submitted",
                      "pbs_job_ids":
-                       { "anti_min":  "12349.meta-pbs",
-                         "syn_min":   "12350.meta-pbs",
-                         "anti_mecp": "12351.meta-pbs",
-                         "syn_mecp":  "12352.meta-pbs" },
+                       { "anti_min/0":  "12349.meta-pbs",
+                         "anti_min/1":  "12350.meta-pbs",
+                         "syn_min/0":   "12351.meta-pbs",
+                         "anti_mecp/0": "12352.meta-pbs",
+                         "syn_mecp/0":  "12353.meta-pbs",
+                         "...":         "..." },
                      "submitted_at": "..." },
     "dft_freq":    { "status": "skipped" },
     "aggregate":   { "status": "pending" }
@@ -289,10 +298,14 @@ produces a single MECP-mimic seed geometry per label. Stages 4–6 (`crest`,
 `{anti_min, syn_min, anti_mecp, syn_mecp}` (the `_min` branches come from
 unconstrained CREST on the closed ground state; the `_mecp` branches come
 from constrained CREST on the `xtb_constr` seed). Stage 4 submits one PBS
-job per label; stages 5–6 also submit one PBS job per label, with all
-conformers for that label processed as a multi-frame XYZ by a single ORCA
-call. The manifest always records a list of conformer entries inside each
-stage's `outputs`, regardless of length:
+job per label. Stage 5 submits one PBS job *per conformer per label* (so
+4 × N jobs total for a molecule with N conformers per label) -- this is
+required because ORCA's multi-frame `*xyzfile` workflow reuses each
+geometry's converged MOs as the SCF guess for the next, which silently
+corrupts energies for chemically distinct conformers. Stage 6 is expected
+to follow the same per-conformer convention. The manifest always records
+a list of conformer entries inside each stage's `outputs`, regardless of
+length:
 
 ```json
 "xtb_constr": {
@@ -388,10 +401,13 @@ job = one molecule). The user picks any path and passes it as `--workspace`.
 │   └── syn_mecp/   ...
 ├── dft_sp/
 │   ├── anti_min/
-│   │   ├── conformers.xyz          (filtered CREST conformers, concatenated)
-│   │   ├── orca.inp                (references conformers.xyz via *xyzfile)
-│   │   ├── jobid
-│   │   └── orca.out                (ORCA stdout; one SP block per frame)
+│   │   ├── conf_0/
+│   │   │   ├── conf_0.xyz          (single-frame XYZ copied from crest filtered/)
+│   │   │   ├── orca.inp            (references conf_0.xyz via *xyzfile)
+│   │   │   ├── jobid
+│   │   │   └── orca.out            (one SP block; ORCA TERMINATED NORMALLY)
+│   │   ├── conf_1/   ...
+│   │   └── conf_K/   ...
 │   ├── syn_min/    ...
 │   ├── anti_mecp/  ...
 │   └── syn_mecp/   ...
@@ -593,8 +609,8 @@ tests/
 │       ├── water_synthetic/ # built-in synthetic data (3-atom toy, always present)
 │       │   ├── crest/{anti_min,syn_min,anti_mecp,syn_mecp}/{crest_conformers.xyz,crest.energies}
 │       │   ├── xtb_constr/{anti,syn}/{input.xtbopt.xyz,input.xtb.log}
-│       │   └── dft_sp/{anti_min,syn_min,anti_mecp,syn_mecp}/orca.out
-│       │       # also: dft_sp/anti_min_failed/orca.out (abnormal-termination fixture)
+│       │   └── dft_sp/{anti_min,syn_min,anti_mecp,syn_mecp}/conf_{0..2}/orca.out
+│       │       # also: dft_sp/anti_min_failed/conf_0/orca.out (abnormal-termination fixture)
 │       └── <name>/          # real cluster output dropped in by the developer (see below)
 │           ├── crest/...
 │           └── xtb_constr/...
@@ -798,27 +814,39 @@ seed source and constraint state.
   implicitly; downstream DFT does not need to re-impose it because the
   geometries are already at the MECP-mimic distance.
 
-### 10.5 dft_sp (PBS, one job per label — four jobs total)
+### 10.5 dft_sp (PBS, one job per conformer per label)
 
 - Input: filtered CREST conformers from each of the four labels
   (`anti_min`, `syn_min`, `anti_mecp`, `syn_mecp`). The `_mecp` geometries
   carry the C-O distance constraint implicitly (set by constrained CREST);
   the `_min` geometries are unconstrained ground-state minima.
-- Action: one ORCA job per label. `submit()` concatenates the filtered
-  per-label conformer XYZ files into a single multi-frame
-  `dft_sp/{label}/conformers.xyz`, writes `dft_sp/{label}/orca.inp`
-  with `*xyzfile 0 1 conformers.xyz`, and invokes:
+- Action: one ORCA job *per conformer*. For each `(label, conf_id)`,
+  `submit()` creates `dft_sp/{label}/conf_{conf_id}/`, copies the
+  conformer's XYZ in as `conf_{conf_id}.xyz`, writes
+  `dft_sp/{label}/conf_{conf_id}/orca.inp` with
+  `*xyzfile 0 1 conf_{conf_id}.xyz`, and invokes:
     `suborca.sh orca.inp <dft_sp.walltime_hours>`
-  from the per-label work directory. ORCA computes an r2SCAN-3c SP energy
-  for each frame sequentially. Solvation model is CPCM (hardcoded;
-  r2SCAN-3c was parametrized with CPCM); solvent name comes from
-  `dft.solvent.name`. Resources: `dft_sp.ncpus` CPUs (default 2),
-  `dft_sp.mem_per_core_mb` MB/core (default 4000).
-- `collect`: for each label, verify `ORCA TERMINATED NORMALLY` in
-  `orca.out`; parse all `FINAL SINGLE POINT ENERGY` lines (one per frame);
-  verify count matches the number of conformers submitted.
+  from that per-conformer directory. Each ORCA call therefore starts from
+  a fresh SCF guess. **Why per-conformer rather than one multi-frame
+  job:** ORCA's `*xyzfile` workflow uses the converged orbitals from
+  geometry *i* as the SCF starting guess for geometry *i+1*. For a
+  conformer ensemble that includes both ground-state minima and
+  MECP-mimic geometries (or otherwise chemically distinct frames) this
+  reuse silently corrupts energies. Each molecule submits roughly 4 × N
+  short jobs (typical N up to `ensemble.max_conformers_per_diastereomer`,
+  default 20, so up to ~80 jobs per molecule); the queue handles this.
+  Solvation model is CPCM (hardcoded; r2SCAN-3c was parametrized with
+  CPCM); solvent name comes from `dft.solvent.name`. Resources:
+  `dft_sp.ncpus` CPUs (default 2), `dft_sp.mem_per_core_mb` MB/core
+  (default 4000).
+- `collect`: for each `(label, conf_id)`, verify
+  `ORCA TERMINATED NORMALLY` in its `orca.out`; parse the single
+  `FINAL SINGLE POINT ENERGY` line. More than one SP energy line in a
+  per-conformer file is rejected (would indicate a multi-frame
+  regression).
 - Output: r2SCAN-3c electronic energy in Hartree, per conformer, keyed by
-  label. `pbs_job_ids` is keyed by label string (not per-conformer).
+  label. `pbs_job_ids` is keyed by `f"{label}/{conf_id}"` (composite key,
+  flat dict).
 
 ### 10.6 dft_freq (PBS, optional — **not yet implemented**)
 
@@ -934,7 +962,7 @@ predict_dr.py xtb_constr   <SMILES> --workspace PATH    # prep+mm+submit 2 PBS j
 predict_dr.py xtb_collect           --workspace PATH    # parse xtb outputs
 predict_dr.py crest                 --workspace PATH    # submit 4 PBS jobs
 predict_dr.py crest_collect         --workspace PATH    # parse crest outputs
-predict_dr.py dft_sp                --workspace PATH    # submit 4 ORCA PBS jobs
+predict_dr.py dft_sp                --workspace PATH    # submit 4 x N ORCA PBS jobs (one per conformer per label)
 predict_dr.py dft_sp_collect        --workspace PATH    # parse dft_sp outputs
 ```
 

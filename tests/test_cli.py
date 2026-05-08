@@ -595,12 +595,16 @@ DFTSP_LABELS = ("anti_min", "syn_min", "anti_mecp", "syn_mecp")
 
 
 def _seed_dft_sp_outputs(workspace: Path, molecule: str = "water_synthetic") -> None:
-    """Copy fixture orca.out files into workspace/dft_sp/<label>/."""
+    """Copy per-conformer fixture orca.out files into workspace/dft_sp/<label>/conf_<i>/."""
     dft_fixture = fixture_molecule_dir(molecule) / "dft_sp"
     for label in DFTSP_LABELS:
-        dest = workspace / "dft_sp" / label
-        dest.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(dft_fixture / label / "orca.out", dest / "orca.out")
+        for i in range(3):
+            dest = workspace / "dft_sp" / label / f"conf_{i}"
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(
+                dft_fixture / label / f"conf_{i}" / "orca.out",
+                dest / "orca.out",
+            )
 
 
 def _manifest_with_crest_done(workspace: Path) -> dict:
@@ -676,7 +680,8 @@ def test_cli_dft_sp_happy_path(
     stored = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     block = stored["stages"]["dft_sp"]
     assert block["status"] == "submitted"
-    assert set(block["pbs_job_ids"].keys()) == set(DFTSP_LABELS)
+    expected_keys = {f"{lbl}/{i}" for lbl in DFTSP_LABELS for i in range(3)}
+    assert set(block["pbs_job_ids"].keys()) == expected_keys
 
 
 def test_cli_dft_sp_collect_fails_when_manifest_missing(
@@ -917,11 +922,15 @@ def test_cli_dft_sp_collect_happy_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manifest = _manifest_with_crest_done(tmp_path)
+    submit_pbs_ids = {
+        f"{label}/{i}": f"{n:02d}.meta-pbs"
+        for n, (label, i) in enumerate(
+            (lbl, idx) for lbl in DFTSP_LABELS for idx in range(3)
+        )
+    }
     manifest["stages"]["dft_sp"] = {
         "status": "submitted",
-        "pbs_job_ids": {
-            label: f"9{i}.meta-pbs" for i, label in enumerate(DFTSP_LABELS)
-        },
+        "pbs_job_ids": submit_pbs_ids,
     }
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     _seed_dft_sp_outputs(tmp_path)
@@ -937,7 +946,7 @@ def test_cli_dft_sp_collect_happy_path(
     block = stored["stages"]["dft_sp"]
     assert block["status"] == "done"
     # pbs_job_ids from submit must survive the collect merge
-    assert set(block["pbs_job_ids"].keys()) == set(DFTSP_LABELS)
+    assert block["pbs_job_ids"] == submit_pbs_ids
     for label in DFTSP_LABELS:
         entries = block["outputs"][label]
         assert len(entries) == 3
