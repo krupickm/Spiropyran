@@ -81,7 +81,7 @@ def generate_orchestrator_pbs(
     so that orchestrator.log is visible on NFS without extra sync calls.
     """
     pbs = config.get("pbs", {})
-    queue = pbs.get("queue_orchestrator", "oven@meta-pbs.metacentrum.cz")
+    queue = pbs.get("queue_orchestrator", "oven")
     walltime = pbs.get("walltime_orchestrator", "720:00:00")
     ws = str(workspace.resolve())
     return (
