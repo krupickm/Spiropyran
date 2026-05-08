@@ -1,0 +1,1180 @@
+{
+  "config_hash": "sha256:b04ca31f9f21097a467078731ba8def0ecbbaf08da42498bb8ed0e9c1dabd66f",
+  "config_path": "/auto/brno2/home/krupickm/devel/Spiropyran/spiropyran_dr/config/default.yaml",
+  "created_at": "2026-05-08T07:48:39.884558+00:00",
+  "molecule_id": "sp_4da276d4",
+  "options": {
+    "thermal": false
+  },
+  "schema_version": 1,
+  "smiles_canonical": "CN1c2ccccc2C(C)(Cc2ccccc2)C12C=Cc1cc([N+](=O)[O-])ccc1O2",
+  "smiles_input": "CC1(CC2=CC=CC=C2)C3(OC(C=CC([N+]([O-])=O)=C4)=C4C=C3)N(C)C5=CC=CC=C51",
+  "stages": {
+    "aggregate": {
+      "finished_at": "2026-05-08T08:31:10.003860+00:00",
+      "outputs": {
+        "ddE": {
+          "ground": {
+            "anti_conf_id": 1,
+            "hartree": -3.320079940749565e-06,
+            "kj_mol": -0.008716868687482183,
+            "ratio_anti_syn": "1.0:1",
+            "syn_conf_id": 1
+          },
+          "mecp": {
+            "anti_conf_id": 14,
+            "hartree": -3.3690614145598374e-05,
+            "kj_mol": -0.08845469529312244,
+            "ratio_anti_syn": "1.0:1",
+            "syn_conf_id": 8
+          }
+        },
+        "result_path": "result.json",
+        "temperature_k": 298.15
+      },
+      "started_at": "2026-05-08T08:31:09.965417+00:00",
+      "status": "done"
+    },
+    "crest": {
+      "finished_at": "2026-05-08T09:58:44.291291+00:00",
+      "outputs": {
+        "anti_mecp": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -82.68468852,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 0.0,
+            "xyz": "crest/anti_mecp/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -82.68375794,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 0.5839477663660547,
+            "xyz": "crest/anti_mecp/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -82.68140688,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 2.0592601904627434,
+            "xyz": "crest/anti_mecp/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -82.68136982,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 2.0825156915695224,
+            "xyz": "crest/anti_mecp/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -82.68124228,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 2.1625482498877915,
+            "xyz": "crest/anti_mecp/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -82.68044287,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 2.6641855985569,
+            "xyz": "crest/anti_mecp/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -82.67943834,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 3.2945376905304715,
+            "xyz": "crest/anti_mecp/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -82.67888989,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 3.6386952615871575,
+            "xyz": "crest/anti_mecp/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -82.67810196,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 4.13312880147761,
+            "xyz": "crest/anti_mecp/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -82.67698424,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 4.834508690834029,
+            "xyz": "crest/anti_mecp/filtered/conf_9.xyz"
+          },
+          {
+            "conf_id": 10,
+            "energy_hartree": -82.67686127,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 4.911673530854866,
+            "xyz": "crest/anti_mecp/filtered/conf_10.xyz"
+          },
+          {
+            "conf_id": 11,
+            "energy_hartree": -82.67542636,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 5.812093150283,
+            "xyz": "crest/anti_mecp/filtered/conf_11.xyz"
+          },
+          {
+            "conf_id": 12,
+            "energy_hartree": -82.67541531,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 5.819027129969942,
+            "xyz": "crest/anti_mecp/filtered/conf_12.xyz"
+          },
+          {
+            "conf_id": 13,
+            "energy_hartree": -82.67540327,
+            "geo_label": "anti",
+            "label": "anti_mecp",
+            "relative_energy_kcal_mol": 5.826582344038561,
+            "xyz": "crest/anti_mecp/filtered/conf_13.xyz"
+          }
+        ],
+        "anti_mecp_xyz_dir": "crest/anti_mecp/filtered",
+        "anti_min": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -82.7273274,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 0.0,
+            "xyz": "crest/anti_min/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -82.72732272,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 0.002936744331914137,
+            "xyz": "crest/anti_min/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -82.72663219,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 0.4362508614566859,
+            "xyz": "crest/anti_min/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -82.72575283,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 0.9880575925681838,
+            "xyz": "crest/anti_min/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -82.72313821,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 2.6287564136447954,
+            "xyz": "crest/anti_min/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -82.72311261,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 2.644820656181273,
+            "xyz": "crest/anti_min/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -82.722819,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 2.8290637128609046,
+            "xyz": "crest/anti_min/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -82.7228112,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 2.833958286762291,
+            "xyz": "crest/anti_min/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -82.72254747,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 2.999451360357172,
+            "xyz": "crest/anti_min/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -82.72207504,
+            "geo_label": "anti",
+            "label": "anti_min",
+            "relative_energy_kcal_mol": 3.295905661190106,
+            "xyz": "crest/anti_min/filtered/conf_9.xyz"
+          }
+        ],
+        "anti_min_xyz_dir": "crest/anti_min/filtered",
+        "n_conformers_anti_mecp": 14,
+        "n_conformers_anti_min": 10,
+        "n_conformers_syn_mecp": 20,
+        "n_conformers_syn_min": 13,
+        "syn_mecp": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -82.68585677,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.0,
+            "xyz": "crest/syn_mecp/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -82.68550266,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.22220737986269054,
+            "xyz": "crest/syn_mecp/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -82.68524669,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.3828309799372253,
+            "xyz": "crest/syn_mecp/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -82.68495373,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.5666661554561788,
+            "xyz": "crest/syn_mecp/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -82.68489756,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.6019133626191241,
+            "xyz": "crest/syn_mecp/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -82.68468865,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.7330063668442571,
+            "xyz": "crest/syn_mecp/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -82.68467105,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.7440505335830692,
+            "xyz": "crest/syn_mecp/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -82.68464141,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 0.7626499143994184,
+            "xyz": "crest/syn_mecp/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -82.68375794,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 1.3170357094442309,
+            "xyz": "crest/syn_mecp/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -82.68148909,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 2.740760579676817,
+            "xyz": "crest/syn_mecp/filtered/conf_9.xyz"
+          },
+          {
+            "conf_id": 10,
+            "energy_hartree": -82.68140674,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 2.79243598486564,
+            "xyz": "crest/syn_mecp/filtered/conf_10.xyz"
+          },
+          {
+            "conf_id": 11,
+            "energy_hartree": -82.68136978,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 2.815628735028738,
+            "xyz": "crest/syn_mecp/filtered/conf_11.xyz"
+          },
+          {
+            "conf_id": 12,
+            "energy_hartree": -82.68136727,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 2.8172037838096537,
+            "xyz": "crest/syn_mecp/filtered/conf_12.xyz"
+          },
+          {
+            "conf_id": 13,
+            "energy_hartree": -82.68124216,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 2.8957114941090856,
+            "xyz": "crest/syn_mecp/filtered/conf_13.xyz"
+          },
+          {
+            "conf_id": 14,
+            "energy_hartree": -82.68070923,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 3.2301301181161612,
+            "xyz": "crest/syn_mecp/filtered/conf_14.xyz"
+          },
+          {
+            "conf_id": 15,
+            "energy_hartree": -82.68044238,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 3.3975810212715967,
+            "xyz": "crest/syn_mecp/filtered/conf_15.xyz"
+          },
+          {
+            "conf_id": 16,
+            "energy_hartree": -82.67943858,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 4.027475031340247,
+            "xyz": "crest/syn_mecp/filtered/conf_16.xyz"
+          },
+          {
+            "conf_id": 17,
+            "energy_hartree": -82.67888983,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 4.371820855227975,
+            "xyz": "crest/syn_mecp/filtered/conf_17.xyz"
+          },
+          {
+            "conf_id": 18,
+            "energy_hartree": -82.67868615,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 4.499631984904197,
+            "xyz": "crest/syn_mecp/filtered/conf_18.xyz"
+          },
+          {
+            "conf_id": 19,
+            "energy_hartree": -82.67810187,
+            "geo_label": "syn",
+            "label": "syn_mecp",
+            "relative_energy_kcal_mol": 4.866273220408665,
+            "xyz": "crest/syn_mecp/filtered/conf_19.xyz"
+          }
+        ],
+        "syn_mecp_xyz_dir": "crest/syn_mecp/filtered",
+        "syn_min": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -82.72732737,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 0.0,
+            "xyz": "crest/syn_min/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -82.72732436,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 0.0018888035171549303,
+            "xyz": "crest/syn_min/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -82.72677967,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 0.3436869389434095,
+            "xyz": "crest/syn_min/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -82.72663225,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 0.43619438561272356,
+            "xyz": "crest/syn_min/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -82.72575292,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 0.9879822914339832,
+            "xyz": "crest/syn_min/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -82.72313823,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 2.628725038172955,
+            "xyz": "crest/syn_min/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -82.72281894,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 2.829082538151143,
+            "xyz": "crest/syn_min/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -82.72207491,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 3.295968412133787,
+            "xyz": "crest/syn_min/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -82.72207029,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 3.2988675059030594,
+            "xyz": "crest/syn_min/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -82.7220691,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 3.2996142421810166,
+            "xyz": "crest/syn_min/filtered/conf_9.xyz"
+          },
+          {
+            "conf_id": 10,
+            "energy_hartree": -82.7216583,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 3.557395134124494,
+            "xyz": "crest/syn_min/filtered/conf_10.xyz"
+          },
+          {
+            "conf_id": 11,
+            "energy_hartree": -82.72014035,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 4.509923140283169,
+            "xyz": "crest/syn_min/filtered/conf_11.xyz"
+          },
+          {
+            "conf_id": 12,
+            "energy_hartree": -82.71972633,
+            "geo_label": "syn",
+            "label": "syn_min",
+            "relative_energy_kcal_mol": 4.769724612730881,
+            "xyz": "crest/syn_min/filtered/conf_12.xyz"
+          }
+        ],
+        "syn_min_xyz_dir": "crest/syn_min/filtered"
+      },
+      "pbs_job_ids": {
+        "anti_mecp": "19864723.pbs-m1.metacentrum.cz",
+        "anti_min": "19864721.pbs-m1.metacentrum.cz",
+        "syn_mecp": "19864724.pbs-m1.metacentrum.cz",
+        "syn_min": "19864722.pbs-m1.metacentrum.cz"
+      },
+      "started_at": "2026-05-08T07:49:49.149385+00:00",
+      "status": "done",
+      "submitted_at": "2026-05-08T07:49:49.149385+00:00"
+    },
+    "dft_freq": {
+      "status": "skipped"
+    },
+    "dft_sp": {
+      "finished_at": "2026-05-08T08:27:47.956075+00:00",
+      "outputs": {
+        "anti_mecp": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -1300.734889885697,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -1300.735496060576,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -1300.7340658279,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -1300.733569981559,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -1300.734237340085,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -1300.736068405239,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -1300.735070232862,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -1300.735318764361,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -1300.73506479569,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -1300.733272642853,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_9.xyz"
+          },
+          {
+            "conf_id": 10,
+            "energy_hartree": -1300.733690521596,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_10.xyz"
+          },
+          {
+            "conf_id": 11,
+            "energy_hartree": -1300.733094165369,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_11.xyz"
+          },
+          {
+            "conf_id": 12,
+            "energy_hartree": -1300.732758538377,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_12.xyz"
+          },
+          {
+            "conf_id": 13,
+            "energy_hartree": -1300.732588133411,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_13.xyz"
+          },
+          {
+            "conf_id": 14,
+            "energy_hartree": -1300.738291257536,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_14.xyz"
+          },
+          {
+            "conf_id": 15,
+            "energy_hartree": -1300.734698413751,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_15.xyz"
+          },
+          {
+            "conf_id": 16,
+            "energy_hartree": -1300.727455480602,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_16.xyz"
+          },
+          {
+            "conf_id": 17,
+            "energy_hartree": -1300.733629208847,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_17.xyz"
+          },
+          {
+            "conf_id": 18,
+            "energy_hartree": -1300.735399565125,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_18.xyz"
+          },
+          {
+            "conf_id": 19,
+            "energy_hartree": -1300.733706428598,
+            "label": "anti_mecp",
+            "xyz": "crest/anti_mecp/filtered/conf_19.xyz"
+          }
+        ],
+        "anti_min": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -1300.75309482142,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -1300.753095863223,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -1300.745187671805,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -1300.751112174635,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -1300.742771448108,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -1300.742582363812,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -1300.746130170412,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -1300.74642896838,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -1300.741499669757,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -1300.745889399763,
+            "label": "anti_min",
+            "xyz": "crest/anti_min/filtered/conf_9.xyz"
+          }
+        ],
+        "syn_mecp": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -1300.735980890769,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -1300.735008901112,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -1300.733718663547,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -1300.733144390147,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -1300.733039870508,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -1300.732810597124,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -1300.731901901615,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -1300.73253603689,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -1300.738257566922,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -1300.73466664555,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_9.xyz"
+          },
+          {
+            "conf_id": 10,
+            "energy_hartree": -1300.733694150887,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_10.xyz"
+          },
+          {
+            "conf_id": 11,
+            "energy_hartree": -1300.7354558353,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_11.xyz"
+          },
+          {
+            "conf_id": 12,
+            "energy_hartree": -1300.733597926907,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_12.xyz"
+          },
+          {
+            "conf_id": 13,
+            "energy_hartree": -1300.726183178107,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_13.xyz"
+          },
+          {
+            "conf_id": 14,
+            "energy_hartree": -1300.735466000725,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_14.xyz"
+          },
+          {
+            "conf_id": 15,
+            "energy_hartree": -1300.734460916733,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_15.xyz"
+          },
+          {
+            "conf_id": 16,
+            "energy_hartree": -1300.727441819027,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_16.xyz"
+          },
+          {
+            "conf_id": 17,
+            "energy_hartree": -1300.727704779101,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_17.xyz"
+          },
+          {
+            "conf_id": 18,
+            "energy_hartree": -1300.727790542738,
+            "label": "syn_mecp",
+            "xyz": "crest/syn_mecp/filtered/conf_18.xyz"
+          }
+        ],
+        "syn_min": [
+          {
+            "conf_id": 0,
+            "energy_hartree": -1300.753084040976,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "energy_hartree": -1300.753092543143,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "energy_hartree": -1300.752694404471,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "energy_hartree": -1300.745159987521,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "energy_hartree": -1300.751095105375,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "energy_hartree": -1300.74276447318,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "energy_hartree": -1300.746061378201,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "energy_hartree": -1300.745919213469,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "energy_hartree": -1300.745918111076,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "energy_hartree": -1300.745915190981,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_9.xyz"
+          },
+          {
+            "conf_id": 10,
+            "energy_hartree": -1300.743693244178,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_10.xyz"
+          },
+          {
+            "conf_id": 11,
+            "energy_hartree": -1300.742287610987,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_11.xyz"
+          },
+          {
+            "conf_id": 12,
+            "energy_hartree": -1300.739401240509,
+            "label": "syn_min",
+            "xyz": "crest/syn_min/filtered/conf_12.xyz"
+          }
+        ]
+      },
+      "pbs_job_ids": {
+        "anti_mecp/0": "19865953.pbs-m1.metacentrum.cz",
+        "anti_mecp/1": "19865954.pbs-m1.metacentrum.cz",
+        "anti_mecp/10": "19865966.pbs-m1.metacentrum.cz",
+        "anti_mecp/11": "19865967.pbs-m1.metacentrum.cz",
+        "anti_mecp/12": "19865968.pbs-m1.metacentrum.cz",
+        "anti_mecp/13": "19865969.pbs-m1.metacentrum.cz",
+        "anti_mecp/14": "19865970.pbs-m1.metacentrum.cz",
+        "anti_mecp/15": "19865971.pbs-m1.metacentrum.cz",
+        "anti_mecp/16": "19865973.pbs-m1.metacentrum.cz",
+        "anti_mecp/17": "19865975.pbs-m1.metacentrum.cz",
+        "anti_mecp/18": "19865976.pbs-m1.metacentrum.cz",
+        "anti_mecp/19": "19865977.pbs-m1.metacentrum.cz",
+        "anti_mecp/2": "19865955.pbs-m1.metacentrum.cz",
+        "anti_mecp/3": "19865958.pbs-m1.metacentrum.cz",
+        "anti_mecp/4": "19865959.pbs-m1.metacentrum.cz",
+        "anti_mecp/5": "19865960.pbs-m1.metacentrum.cz",
+        "anti_mecp/6": "19865961.pbs-m1.metacentrum.cz",
+        "anti_mecp/7": "19865963.pbs-m1.metacentrum.cz",
+        "anti_mecp/8": "19865964.pbs-m1.metacentrum.cz",
+        "anti_mecp/9": "19865965.pbs-m1.metacentrum.cz",
+        "anti_min/0": "19865920.pbs-m1.metacentrum.cz",
+        "anti_min/1": "19865921.pbs-m1.metacentrum.cz",
+        "anti_min/2": "19865923.pbs-m1.metacentrum.cz",
+        "anti_min/3": "19865926.pbs-m1.metacentrum.cz",
+        "anti_min/4": "19865928.pbs-m1.metacentrum.cz",
+        "anti_min/5": "19865929.pbs-m1.metacentrum.cz",
+        "anti_min/6": "19865932.pbs-m1.metacentrum.cz",
+        "anti_min/7": "19865933.pbs-m1.metacentrum.cz",
+        "anti_min/8": "19865934.pbs-m1.metacentrum.cz",
+        "anti_min/9": "19865936.pbs-m1.metacentrum.cz",
+        "syn_mecp/0": "19865978.pbs-m1.metacentrum.cz",
+        "syn_mecp/1": "19865979.pbs-m1.metacentrum.cz",
+        "syn_mecp/10": "19865989.pbs-m1.metacentrum.cz",
+        "syn_mecp/11": "19865990.pbs-m1.metacentrum.cz",
+        "syn_mecp/12": "19865992.pbs-m1.metacentrum.cz",
+        "syn_mecp/13": "19865993.pbs-m1.metacentrum.cz",
+        "syn_mecp/14": "19865995.pbs-m1.metacentrum.cz",
+        "syn_mecp/15": "19865997.pbs-m1.metacentrum.cz",
+        "syn_mecp/16": "19865998.pbs-m1.metacentrum.cz",
+        "syn_mecp/17": "19865999.pbs-m1.metacentrum.cz",
+        "syn_mecp/18": "19866000.pbs-m1.metacentrum.cz",
+        "syn_mecp/2": "19865981.pbs-m1.metacentrum.cz",
+        "syn_mecp/3": "19865982.pbs-m1.metacentrum.cz",
+        "syn_mecp/4": "19865983.pbs-m1.metacentrum.cz",
+        "syn_mecp/5": "19865984.pbs-m1.metacentrum.cz",
+        "syn_mecp/6": "19865985.pbs-m1.metacentrum.cz",
+        "syn_mecp/7": "19865986.pbs-m1.metacentrum.cz",
+        "syn_mecp/8": "19865987.pbs-m1.metacentrum.cz",
+        "syn_mecp/9": "19865988.pbs-m1.metacentrum.cz",
+        "syn_min/0": "19865938.pbs-m1.metacentrum.cz",
+        "syn_min/1": "19865939.pbs-m1.metacentrum.cz",
+        "syn_min/10": "19865948.pbs-m1.metacentrum.cz",
+        "syn_min/11": "19865951.pbs-m1.metacentrum.cz",
+        "syn_min/12": "19865952.pbs-m1.metacentrum.cz",
+        "syn_min/2": "19865940.pbs-m1.metacentrum.cz",
+        "syn_min/3": "19865941.pbs-m1.metacentrum.cz",
+        "syn_min/4": "19865942.pbs-m1.metacentrum.cz",
+        "syn_min/5": "19865943.pbs-m1.metacentrum.cz",
+        "syn_min/6": "19865944.pbs-m1.metacentrum.cz",
+        "syn_min/7": "19865945.pbs-m1.metacentrum.cz",
+        "syn_min/8": "19865946.pbs-m1.metacentrum.cz",
+        "syn_min/9": "19865947.pbs-m1.metacentrum.cz"
+      },
+      "started_at": "2026-05-08T08:21:59.675463+00:00",
+      "status": "done",
+      "submitted_at": "2026-05-08T08:23:17.160141+00:00"
+    },
+    "mm": {
+      "finished_at": "2026-05-08T07:48:39.884194+00:00",
+      "outputs": {
+        "anti": [
+          {
+            "conf_id": 0,
+            "embed_id": 22,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 106.3211823747395,
+            "xyz": "mm/anti/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "embed_id": 20,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 107.84863695693517,
+            "xyz": "mm/anti/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "embed_id": 40,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 108.1487146202739,
+            "xyz": "mm/anti/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "embed_id": 31,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 108.76159753857698,
+            "xyz": "mm/anti/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "embed_id": 44,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 108.9387307772836,
+            "xyz": "mm/anti/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "embed_id": 32,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 110.74642567840999,
+            "xyz": "mm/anti/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "embed_id": 11,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 110.88011560680987,
+            "xyz": "mm/anti/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "embed_id": 0,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 112.16711145049716,
+            "xyz": "mm/anti/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "embed_id": 15,
+            "label": "anti",
+            "mmff_energy_kcal_mol": 112.60881070723342,
+            "xyz": "mm/anti/conf_8.xyz"
+          }
+        ],
+        "anti_xyz_dir": "mm/anti",
+        "n_conformers_anti": 9,
+        "n_conformers_syn": 10,
+        "sidecar_path": "mm/conformers.json",
+        "syn": [
+          {
+            "conf_id": 0,
+            "embed_id": 29,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 106.32118232497068,
+            "xyz": "mm/syn/conf_0.xyz"
+          },
+          {
+            "conf_id": 1,
+            "embed_id": 16,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 106.55412646595403,
+            "xyz": "mm/syn/conf_1.xyz"
+          },
+          {
+            "conf_id": 2,
+            "embed_id": 41,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 107.84943235619902,
+            "xyz": "mm/syn/conf_2.xyz"
+          },
+          {
+            "conf_id": 3,
+            "embed_id": 33,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 108.1487146091126,
+            "xyz": "mm/syn/conf_3.xyz"
+          },
+          {
+            "conf_id": 4,
+            "embed_id": 26,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 109.52402199171038,
+            "xyz": "mm/syn/conf_4.xyz"
+          },
+          {
+            "conf_id": 5,
+            "embed_id": 3,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 110.74642570111878,
+            "xyz": "mm/syn/conf_5.xyz"
+          },
+          {
+            "conf_id": 6,
+            "embed_id": 12,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 111.07921224642806,
+            "xyz": "mm/syn/conf_6.xyz"
+          },
+          {
+            "conf_id": 7,
+            "embed_id": 37,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 112.10739259619163,
+            "xyz": "mm/syn/conf_7.xyz"
+          },
+          {
+            "conf_id": 8,
+            "embed_id": 25,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 112.16711077626954,
+            "xyz": "mm/syn/conf_8.xyz"
+          },
+          {
+            "conf_id": 9,
+            "embed_id": 35,
+            "label": "syn",
+            "mmff_energy_kcal_mol": 113.97561142561949,
+            "xyz": "mm/syn/conf_9.xyz"
+          }
+        ],
+        "syn_xyz_dir": "mm/syn"
+      },
+      "started_at": "2026-05-08T07:48:35.233583+00:00",
+      "status": "done"
+    },
+    "prep": {
+      "finished_at": "2026-05-08T07:48:35.233441+00:00",
+      "outputs": {
+        "chromene_oxygen_idx": 29,
+        "gem_carbon_idx": 8,
+        "indoline_nitrogen_idx": 1,
+        "smarts_filter": {
+          "forbidden_present": [],
+          "passed": true,
+          "required_missing": []
+        },
+        "smiles_anti": "CN1c2ccccc2C(C)(Cc2ccccc2)C12C=Cc1cc([N+](=O)[O-])ccc1O2",
+        "smiles_canonical": "CN1c2ccccc2C(C)(Cc2ccccc2)C12C=Cc1cc([N+](=O)[O-])ccc1O2",
+        "smiles_syn": "CN1c2ccccc2C(C)(Cc2ccccc2)C12C=Cc1cc([N+](=O)[O-])ccc1O2",
+        "spiro_carbon_idx": 17,
+        "spiro_cip": "R",
+        "stereocentres_path": "prep/stereocentres.json"
+      },
+      "started_at": "2026-05-08T07:48:35.128383+00:00",
+      "status": "done"
+    },
+    "xtb_constr": {
+      "finished_at": "2026-05-08T07:49:49.104056+00:00",
+      "outputs": {
+        "anti": [
+          {
+            "co_distance_final_ang": 3.398354682381743,
+            "conf_id": 0,
+            "energy_hartree": -82.671487744442,
+            "label": "anti",
+            "xyz": "xtb_constr/anti/input.xtbopt.xyz"
+          }
+        ],
+        "syn": [
+          {
+            "co_distance_final_ang": 3.3983457709308724,
+            "conf_id": 0,
+            "energy_hartree": -82.671485302243,
+            "label": "syn",
+            "xyz": "xtb_constr/syn/input.xtbopt.xyz"
+          }
+        ]
+      },
+      "pbs_job_ids": {
+        "anti": "19864702.pbs-m1.metacentrum.cz",
+        "syn": "19864703.pbs-m1.metacentrum.cz"
+      },
+      "started_at": "2026-05-08T07:48:47.871562+00:00",
+      "status": "done",
+      "submitted_at": "2026-05-08T07:48:47.871562+00:00"
+    }
+  }
+}
