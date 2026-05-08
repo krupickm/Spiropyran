@@ -63,7 +63,15 @@ def non_spiro_smiles() -> str:
 
 @pytest.fixture
 def charged_smiles() -> str:
-    return "C[N+](C)(C)C.[Cl-]"
+    # Tetramethylammonium cation: net charge +1, clearly not a neutral closed-form SP.
+    return "C[N+](C)(C)C"
+
+
+@pytest.fixture
+def nitro_sp_smiles() -> str:
+    # 6'-nitro BIPS variant. The nitro group is rendered as [N+]([O-])=O in SMILES
+    # (standard Kekulé-style zwitterion), but the molecule is net-neutral overall.
+    return "CC1(C)C2(OC(C=CC([N+]([O-])=O)=C3)=C3C=C2)N(C)C4=CC=CC=C41"
 
 
 @pytest.fixture

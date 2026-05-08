@@ -143,6 +143,13 @@ def test_sanity_check_rejects_too_small(non_spiro_smiles: str) -> None:
     assert any("heavy atoms" in e for e in errors)
 
 
+def test_sanity_check_pass_on_nitro_sp(nitro_sp_smiles: str) -> None:
+    # Nitro groups are [N+]([O-])=O in SMILES but net-neutral; must not be rejected.
+    mol = Chem.MolFromSmiles(nitro_sp_smiles)
+    assert mol is not None, "RDKit failed to parse the nitro SP SMILES"
+    assert sanity_check(mol) == []
+
+
 # --- stage-level submit/collect/is_ready ----------------------------------
 
 

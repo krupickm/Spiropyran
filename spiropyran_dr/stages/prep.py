@@ -97,13 +97,13 @@ def apply_smarts_filters(
 
 def sanity_check(mol: Chem.Mol) -> list[str]:
     errors: list[str] = []
-    for atom in mol.GetAtoms():
-        if atom.GetFormalCharge() != 0:
-            errors.append(
-                f"atom {atom.GetIdx()} ({atom.GetSymbol()}) has formal charge "
-                f"{atom.GetFormalCharge()}; closed spiropyran inputs must be neutral"
-            )
-            break
+    net_charge = Chem.GetFormalCharge(mol)
+    if net_charge != 0:
+        # Use net charge, not per-atom: nitro groups ([N+]([O-])=O) are net-neutral
+        # zwitterions and must not be rejected.
+        errors.append(
+            f"net formal charge {net_charge:+d}; closed spiropyran inputs must be neutral"
+        )
     for atom in mol.GetAtoms():
         if atom.GetNumRadicalElectrons() != 0:
             errors.append(
