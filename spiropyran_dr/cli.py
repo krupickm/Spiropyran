@@ -17,6 +17,7 @@ from spiropyran_dr.pbs_utils import (
 from spiropyran_dr.pipeline import PipelineError, molecule_id_from_smiles, run
 from spiropyran_dr.stages import (
     STAGE_ORDER,
+    aggregate,
     crest_stage,
     dft_sp_stage,
     mm,
@@ -270,6 +271,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to pipeline config YAML.",
     )
     p_dft_sp.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full submit() return dict as JSON on stdout.",
+    )
+
+    p_aggregate = sub.add_parser(
+        "aggregate",
+        help="Run stage 7 (aggregate) on an existing manifest. Reads dft_sp "
+        "energies, prints raw values + ddE, writes result.json.",
+    )
+    p_aggregate.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path("./run_scratch"),
+        help="Workspace directory containing manifest.json with dft_sp done.",
+    )
+    p_aggregate.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="Path to pipeline config YAML.",
+    )
+    p_aggregate.add_argument(
         "--json",
         dest="as_json",
         action="store_true",
@@ -803,6 +828,44 @@ def _run_dft_sp_collect(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "done" else 1
 
 
+def _run_aggregate(args: argparse.Namespace) -> int:
+    if not _manifest_path(args.workspace).is_file():
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: manifest.json not found in {args.workspace}; "
+            "run dft_sp_collect first",
+            file=sys.stderr,
+        )
+        return 1
+
+    manifest = _load_manifest(args.workspace)
+    stages = manifest.setdefault("stages", {})
+    dft_sp_status = (stages.get("dft_sp") or {}).get("status")
+    if dft_sp_status != "done":
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: dft_sp stage is {dft_sp_status!r}, must be 'done' "
+            "before aggregate",
+            file=sys.stderr,
+        )
+        return 1
+
+    config = load_config(args.config)
+    result = aggregate.submit(manifest, args.workspace, config)
+    stages["aggregate"] = result
+    _save_manifest(args.workspace, manifest)
+
+    if args.as_json:
+        json.dump(result, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    # Non-JSON path: aggregate.submit() already printed the summary table.
+    elif result["status"] != "done":
+        print("status: failed", file=sys.stderr)
+        print(f"reason: {result.get('failure_reason', '<unknown>')}", file=sys.stderr)
+
+    return 0 if result["status"] == "done" else 1
+
+
 def _run_submit(args: argparse.Namespace) -> int:
     workspace = (args.workspace or Path.cwd()).resolve()
     config_path = _resolve_config(args.config)
@@ -994,6 +1057,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_dft_sp(args)
     if args.command == "dft_sp_collect":
         return _run_dft_sp_collect(args)
+    if args.command == "aggregate":
+        return _run_aggregate(args)
     if args.command == "submit":
         return _run_submit(args)
     if args.command == "predict":

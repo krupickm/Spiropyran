@@ -418,81 +418,40 @@ job = one molecule). The user picks any path and passes it as `--workspace`.
 
 ## 7. Output: result.json
 
-Always written when stage `aggregate` completes. CLI verbosity flags choose
-which fields are echoed to stdout; the file is always complete.
+Always written when stage `aggregate` completes. **v1 (current):** the
+simplistic schema below — raw per-conformer energies plus lowest-conformer
+ΔΔE for both ensemble pairs. The full schema with Boltzmann averages,
+ΔΔG, and d.r. conversion (Truhlar/Grimme quasi-harmonic, etc.) is
+deferred to v2; see §10.7.
 
 ```json
 {
   "molecule_id": "sp_0001",
-  "smiles_input": "...",
   "smiles_canonical": "...",
+  "config_hash": "sha256:...",
+  "temperature_k": 298.15,
 
-  "predictions": {
-    "mecp": {
-      "lowest_conformer": {
-        "delta_e_kj_mol": 3.2,
-        "dr_anti_syn_from_e": 0.78,
-        "delta_g_kj_mol": 2.9,
-        "dr_anti_syn_from_g": 0.76,
-        "selected_conf": { "anti_mecp": 4, "syn_mecp": 1 }
-      },
-      "boltzmann": {
-        "delta_e_kj_mol": 2.8,
-        "dr_anti_syn_from_e": 0.76,
-        "delta_g_kj_mol": 2.6,
-        "dr_anti_syn_from_g": 0.74,
-        "n_conformers_used": { "anti_mecp": 7, "syn_mecp": 9 }
-      }
-    },
-    "ground_state": {
-      "lowest_conformer": {
-        "delta_e_kj_mol": 1.1,
-        "dr_anti_syn_from_e": 0.62,
-        "delta_g_kj_mol": 0.9,
-        "dr_anti_syn_from_g": 0.59,
-        "selected_conf": { "anti_min": 0, "syn_min": 2 }
-      },
-      "boltzmann": {
-        "delta_e_kj_mol": 0.8,
-        "dr_anti_syn_from_e": 0.58,
-        "delta_g_kj_mol": 0.7,
-        "dr_anti_syn_from_g": 0.57,
-        "n_conformers_used": { "anti_min": 11, "syn_min": 12 }
-      }
-    }
-  },
-
-  "thermal_included": true,
-
-  "energies": {
-    "anti_min":  [ { "conf_id": 0, "e_dft_hartree": -1234.567,
-                     "g_corr_hartree": 0.0421, "g_total_hartree": -1234.525 },
-                   "..." ],
+  "energies_hartree": {
+    "anti_min":  [ { "conf_id": 0, "energy_hartree": -1234.567 }, "..." ],
     "syn_min":   [ "..." ],
     "anti_mecp": [ "..." ],
     "syn_mecp":  [ "..." ]
   },
 
-  "config_hash": "sha256:...",
-  "config_path": "config/default.yaml",
-  "wall_time_seconds": {
-    "xtb_constr": { "anti": 35, "syn": 41 },
-    "crest":      { "anti_min":  8421, "syn_min":  9123,
-                    "anti_mecp": 7544, "syn_mecp": 8002 },
-    "dft_sp":     31200,
-    "dft_freq":   18400
+  "ddE": {
+    "mecp":   { "hartree": 0.00076, "kj_mol": 2.0,
+                "anti_conf_id": 0, "syn_conf_id": 0,
+                "ratio_anti_syn": "1:2.2" },
+    "ground": { "hartree": 0.00038, "kj_mol": 1.0,
+                "anti_conf_id": 0, "syn_conf_id": 0,
+                "ratio_anti_syn": "1:1.5" }
   }
 }
 ```
 
-The CLI's headline number (printed when `--verbose` is not set) is
-`predictions.mecp.lowest_conformer.delta_e_kj_mol` and the corresponding
-d.r. — the kinetic, lowest-conformer prediction. The ground-state
-prediction is reported alongside but is secondary.
-
-If `--no-thermal`, `predictions.{mecp,ground_state}.{lowest_conformer,boltzmann}.delta_g_kj_mol`
-and the corresponding `dr_anti_syn_from_g` are `null`, `thermal_included` is
-`false`, and `g_corr_hartree` / `g_total_hartree` are absent.
+ΔΔE sign convention: `E(anti) - E(syn)`. The ratio is computed as
+`K = exp(-ΔΔE / RT)` at `T = 298.15 K` and rendered with `anti` always
+first — `K:1` when anti dominates, `1:(1/K)` when syn dominates.
 
 ---
 
@@ -587,7 +546,7 @@ spiropyran_dr/
 │   ├── xtb_stage.py
 │   ├── dft_sp_stage.py
 │   ├── dft_freq_stage.py    # NOT YET IMPLEMENTED (get_stage_module returns None → skipped)
-│   └── aggregate.py         # NOT YET IMPLEMENTED
+│   └── aggregate.py         # v1 simplistic (lowest-conformer ΔΔE only); see §10.7
 ├── config/
 │   ├── default.yaml
 │   └── smarts.yaml
@@ -869,34 +828,47 @@ seed source and constraint state.
   large-basis SP energy: `g_total = E(ωB97X-D3BJ) + g_corr`.
 - Output: per-conformer thermal corrections and total G.
 
-### 10.7 aggregate (local — **not yet implemented**)
+### 10.7 aggregate (local — v1 simplistic)
 
-- Input: per-conformer energies from dft_sp (and optionally dft_freq) for
-  all four labels.
-- Action: compute the d.r. **twice** -- once from each ensemble pair --
-  and report both.
-  - **MECP / kinetic** prediction: use the `{anti_mecp, syn_mecp}`
-    ensembles. ΔΔE‡ = E(anti_mecp) − E(syn_mecp); ΔΔG‡ analogous when
-    thermal data is present. This is the primary number; it is the
-    pipeline's headline d.r. and is printed by the CLI when `--verbose`
-    is not set.
-  - **Ground-state / thermodynamic** prediction: use the
-    `{anti_min, syn_min}` ensembles. ΔΔE = E(anti_min) − E(syn_min);
-    ΔΔG analogous. Reported alongside the MECP prediction; intended for
-    cross-checks and downstream descriptor work, not as a substitute for
-    the MECP prediction (the ground-state energy landscape is too flat
-    to give a reliable d.r. on its own -- see §1).
-  - For each ensemble pair, both ensemble treatments are computed:
-    - **Lowest-energy**: pick the conformer with the lowest E (and lowest
-      G, independently -- the lowest-E and lowest-G conformer may differ).
-    - **Boltzmann**: compute Boltzmann-weighted average energy / free
-      energy over conformers within `ensemble.energy_window_kj_mol` of
-      the minimum. Boltzmann average:
-      ⟨E⟩ = Σ Eᵢ exp(−Eᵢ/RT) / Σ exp(−Eᵢ/RT).
-  - In all cases:
-      d.r.(anti:syn) = exp(−ΔΔ / RT)   at `temperature_kelvin`.
-- Output: write `result.json` per the schema in §7. Both
-  `predictions.mecp` and `predictions.ground_state` are populated.
+The current implementation is deliberately small: read dft_sp energies
+from the manifest, take the lowest-conformer ΔΔE for each ensemble
+pair, convert to a Boltzmann ratio at room temperature, and write
+`result.json`. No conformer averaging, no thermal corrections, no full
+d.r. machinery -- those return in v2.
+
+- **Input:** `manifest["stages"]["dft_sp"]["outputs"][label]` for each
+  of the four labels `{anti_min, syn_min, anti_mecp, syn_mecp}`. Each
+  entry must carry `conf_id` and `energy_hartree`.
+- **Action:**
+  - Pick the lowest-`energy_hartree` conformer in each label
+    (independently per label).
+  - Compute ΔΔE = E(anti) − E(syn) for both ensemble pairs:
+    `mecp = anti_mecp − syn_mecp`, `ground = anti_min − syn_min`.
+    Convert to kJ/mol via `2625.4996…`.
+  - Compute K = exp(−ΔΔE / RT) at `T = 298.15 K`. Render as an
+    `anti:syn` ratio with anti always first: `K:1` when K ≥ 1,
+    `1:(1/K)` otherwise (one decimal place).
+  - Print raw per-conformer energies and the two ΔΔE numbers + ratios
+    to stdout. The orchestrator captures stdout into the PBS job log;
+    the `predict_dr.py aggregate` CLI subcommand prints the same lines
+    directly to the user's terminal.
+  - Write `result.json` per the v1 schema in §7.
+- **Output (manifest stage block):**
+  ```
+  outputs = {
+    "result_path": "result.json",
+    "ddE": { "mecp": {...}, "ground": {...} },
+    "temperature_k": 298.15
+  }
+  ```
+- **Failure modes:** any of the four labels having zero conformers
+  fails the stage with a reason string naming the empty label.
+
+**Deferred to v2:** Boltzmann-weighted averages over the conformer
+ensemble, ΔΔG from `dft_freq`, the headline d.r. number, the full
+nested `predictions.{mecp,ground_state}.{lowest_conformer,boltzmann}`
+result schema, and `wall_time_seconds`. v2 will land alongside the
+first real-molecule end-to-end run.
 
 ---
 
@@ -964,6 +936,7 @@ predict_dr.py crest                 --workspace PATH    # submit 4 PBS jobs
 predict_dr.py crest_collect         --workspace PATH    # parse crest outputs
 predict_dr.py dft_sp                --workspace PATH    # submit 4 x N ORCA PBS jobs (one per conformer per label)
 predict_dr.py dft_sp_collect        --workspace PATH    # parse dft_sp outputs
+predict_dr.py aggregate             --workspace PATH    # run stage 7 (local); writes result.json
 ```
 
 Each `*_collect` command reads `manifest.json`, requires the upstream
