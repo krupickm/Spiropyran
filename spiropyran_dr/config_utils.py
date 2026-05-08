@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# Config sections that affect chemistry outcomes; included in the manifest hash.
+_CHEMISTRY_SECTIONS = ("mecp", "xtb_constr", "crest", "dft")
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -58,6 +63,13 @@ def load_config(path: Path) -> dict[str, Any]:
     crest = data.get("crest") or {}
     data["crest"] = {**CREST_DEFAULTS, **crest}
     return data
+
+
+def compute_config_hash(config: dict[str, Any]) -> str:
+    """SHA-256 over the chemistry-relevant config sections (canonical JSON)."""
+    relevant = {k: config[k] for k in _CHEMISTRY_SECTIONS if k in config}
+    canonical = json.dumps(relevant, sort_keys=True, ensure_ascii=True)
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def load_smarts(path: Path) -> dict[str, Any]:

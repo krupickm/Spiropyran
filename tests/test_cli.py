@@ -662,7 +662,9 @@ def test_cli_dft_sp_happy_path(
 
     manifest = _manifest_with_crest_done(tmp_path)
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    monkeypatch.setattr(dft_sp_stage, "submit_via_script", _fake_pbs_submitter("orca-pbs"))
+    monkeypatch.setattr(
+        dft_sp_stage, "submit_via_script", _fake_pbs_submitter("orca-pbs")
+    )
 
     rc = main(["dft_sp", "--workspace", str(tmp_path)])
     captured = capsys.readouterr()
@@ -699,6 +701,216 @@ def test_cli_dft_sp_collect_fails_when_status_pending(
     assert "pending" in captured.err
 
 
+# ---------------------------------------------------------------------------
+# submit (dry-run)
+# ---------------------------------------------------------------------------
+
+
+def test_cli_submit_dry_run_prints_pbs_script(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(
+        [
+            "submit",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "10",
+            "--seed",
+            "42",
+            "--dry-run",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    assert "#!/bin/bash" in captured.out
+    assert "#PBS" in captured.out
+    assert str(tmp_path) in captured.out
+    assert "molecule_id" in captured.out
+    # manifest must have been written
+    assert (tmp_path / "manifest.json").is_file()
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stages"]["prep"]["status"] == "done"
+    assert manifest["stages"]["mm"]["status"] == "done"
+    assert manifest["stages"]["xtb_constr"]["status"] == "pending"
+
+
+def test_cli_submit_dry_run_writes_pbs_script_file(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(
+        [
+            "submit",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "10",
+            "--seed",
+            "42",
+            "--dry-run",
+        ]
+    )
+    capsys.readouterr()
+    pbs_script = tmp_path / "orchestrator.pbs.sh"
+    assert pbs_script.is_file()
+    content = pbs_script.read_text(encoding="utf-8")
+    assert "#!/bin/bash" in content
+    assert "predict" in content
+
+
+def test_cli_submit_dry_run_invalid_smiles_returns_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["submit", "not-a-smiles", "--workspace", str(tmp_path), "--dry-run"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "failed" in captured.err.lower()
+
+
+def test_cli_submit_dry_run_stores_config_hash(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(
+        [
+            "submit",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "10",
+            "--seed",
+            "42",
+            "--dry-run",
+        ]
+    )
+    capsys.readouterr()
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["config_hash"].startswith("sha256:")
+    assert manifest["molecule_id"].startswith("sp_")
+    assert manifest["options"] == {"thermal": False}
+
+
+def test_cli_submit_dry_run_thermal_flag(
+    tmp_path: Path,
+    chiral_bips_smiles: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    main(
+        [
+            "submit",
+            chiral_bips_smiles,
+            "--workspace",
+            str(tmp_path),
+            "--n-embed",
+            "10",
+            "--seed",
+            "42",
+            "--thermal",
+            "--dry-run",
+        ]
+    )
+    capsys.readouterr()
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["options"]["thermal"] is True
+
+
+# ---------------------------------------------------------------------------
+# status
+# ---------------------------------------------------------------------------
+
+
+def _manifest_for_status(tmp_path: Path) -> None:
+    manifest = {
+        "molecule_id": "sp_abc12345",
+        "smiles_input": "CCO",
+        "stages": {
+            "prep": {"status": "done", "finished_at": "2026-05-07T10:00:00+00:00"},
+            "mm": {"status": "done", "finished_at": "2026-05-07T10:00:05+00:00"},
+            "xtb_constr": {
+                "status": "submitted",
+                "submitted_at": "2026-05-07T10:01:00+00:00",
+                "pbs_job_ids": {"anti": "12345.meta-pbs", "syn": "12346.meta-pbs"},
+            },
+            "crest": {"status": "pending"},
+            "dft_sp": {"status": "pending"},
+            "dft_freq": {"status": "skipped"},
+            "aggregate": {"status": "pending"},
+        },
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_cli_status_prints_all_stages(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _manifest_for_status(tmp_path)
+    rc = main(["status", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 0, captured.err
+    for stage in (
+        "prep",
+        "mm",
+        "xtb_constr",
+        "crest",
+        "dft_sp",
+        "dft_freq",
+        "aggregate",
+    ):
+        assert stage in captured.out
+    assert "sp_abc12345" in captured.out
+    assert "12345.meta-pbs" in captured.out
+
+
+def test_cli_status_fails_without_manifest(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["status", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# predict / resume — fail without manifest
+# ---------------------------------------------------------------------------
+
+
+def test_cli_predict_fails_without_manifest(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["predict", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+def test_cli_resume_fails_without_manifest(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["resume", "--workspace", str(tmp_path)])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "manifest.json" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# dft_sp_collect happy-path (already defined below, keep existing)
+# ---------------------------------------------------------------------------
+
+
 def test_cli_dft_sp_collect_happy_path(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -707,7 +919,9 @@ def test_cli_dft_sp_collect_happy_path(
     manifest = _manifest_with_crest_done(tmp_path)
     manifest["stages"]["dft_sp"] = {
         "status": "submitted",
-        "pbs_job_ids": {label: f"9{i}.meta-pbs" for i, label in enumerate(DFTSP_LABELS)},
+        "pbs_job_ids": {
+            label: f"9{i}.meta-pbs" for i, label in enumerate(DFTSP_LABELS)
+        },
     }
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     _seed_dft_sp_outputs(tmp_path)

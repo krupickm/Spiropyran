@@ -2,17 +2,48 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from spiropyran_dr.config_utils import load_config
+from spiropyran_dr.config_utils import compute_config_hash, load_config
 from spiropyran_dr.io_utils import atomic_write_json
-from spiropyran_dr.stages import crest_stage, dft_sp_stage, mm, prep, xtb_stage
+from spiropyran_dr.pbs_utils import (
+    generate_orchestrator_pbs,
+    parse_jobid_from_qsub_stdout,
+)
+from spiropyran_dr.pipeline import PipelineError, molecule_id_from_smiles, run
+from spiropyran_dr.stages import (
+    STAGE_ORDER,
+    crest_stage,
+    dft_sp_stage,
+    mm,
+    prep,
+    xtb_stage,
+)
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = PACKAGE_ROOT / "config" / "default.yaml"
 DEFAULT_SMARTS = PACKAGE_ROOT / "config" / "smarts.yaml"
+
+
+def _resolve_config(explicit: Path | None) -> Path:
+    """Return the config path to use.
+
+    Priority: explicit argument > ./default.yaml in cwd > package default.
+    """
+    if explicit is not None:
+        return explicit
+    local = Path("default.yaml")
+    if local.is_file():
+        return local
+    return DEFAULT_CONFIG
+
+
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()
 
 
 def _manifest_path(workspace: Path) -> Path:
@@ -266,6 +297,103 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="as_json",
         action="store_true",
         help="Emit the full collect() return dict as JSON on stdout.",
+    )
+
+    # ------------------------------------------------------------------ submit
+    p_submit = sub.add_parser(
+        "submit",
+        help="Run prep+MM locally, generate the PBS orchestrator job, and qsub it. "
+        "This is the entry point for a new run. Use --dry-run to inspect the PBS "
+        "script without submitting.",
+    )
+    p_submit.add_argument(
+        "smiles", help="Input SMILES string for the closed spiropyran."
+    )
+    p_submit.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        help="Workspace directory (default: current working directory).",
+    )
+    p_submit.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to pipeline config YAML (default: ./default.yaml or package default).",
+    )
+    p_submit.add_argument(
+        "--smarts",
+        type=Path,
+        default=DEFAULT_SMARTS,
+        help="Path to atom-role SMARTS YAML.",
+    )
+    p_submit.add_argument(
+        "--molecule-id",
+        default=None,
+        help="Override the auto-generated molecule ID (sha256 prefix of canonical SMILES).",
+    )
+    p_submit.add_argument(
+        "--n-embed",
+        type=int,
+        default=None,
+        help="Override mm.n_embed from config.",
+    )
+    p_submit.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override mm.random_seed from config.",
+    )
+    p_submit.add_argument(
+        "--thermal",
+        dest="thermal",
+        action="store_true",
+        default=False,
+        help="Enable thermal corrections (dft_freq stage). Default: off.",
+    )
+    p_submit.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write manifest and PBS script but do not call qsub.",
+    )
+
+    # ------------------------------------------------------------------ predict
+    p_predict = sub.add_parser(
+        "predict",
+        help="Run the blocking orchestrator loop. Reads manifest.json from the "
+        "workspace. Called automatically from inside the PBS orchestrator job; "
+        "use 'resume' for manual re-entry after the job died.",
+    )
+    p_predict.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        help="Workspace directory (default: current working directory).",
+    )
+
+    # ------------------------------------------------------------------ status
+    p_status = sub.add_parser(
+        "status",
+        help="Print a summary of stage progress from manifest.json.",
+    )
+    p_status.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        help="Workspace directory (default: current working directory).",
+    )
+
+    # ------------------------------------------------------------------ resume
+    p_resume = sub.add_parser(
+        "resume",
+        help="Re-enter the orchestrator loop on an existing manifest. "
+        "Use when the PBS orchestrator job died and you are re-entering manually.",
+    )
+    p_resume.add_argument(
+        "--workspace",
+        type=Path,
+        default=None,
+        help="Workspace directory (default: current working directory).",
     )
 
     return parser
@@ -661,6 +789,173 @@ def _run_dft_sp_collect(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "done" else 1
 
 
+def _run_submit(args: argparse.Namespace) -> int:
+    workspace = (args.workspace or Path.cwd()).resolve()
+    config_path = _resolve_config(args.config)
+    config = load_config(config_path)
+    config.setdefault("paths", {})["smarts"] = str(args.smarts)
+    if args.n_embed is not None:
+        config["mm"]["n_embed"] = args.n_embed
+    if args.seed is not None:
+        config["mm"]["random_seed"] = args.seed
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    manifest: dict = {"smiles_input": args.smiles, "stages": {}}
+
+    # --- prep ---------------------------------------------------------------
+    prep_result = prep.submit(manifest, workspace, config)
+    manifest["stages"]["prep"] = prep_result
+    if prep_result["status"] != "done":
+        print("status: failed (prep)", file=sys.stderr)
+        print(
+            f"reason: {prep_result.get('failure_reason', '<unknown>')}",
+            file=sys.stderr,
+        )
+        return 1
+
+    prep_out = prep_result["outputs"]
+    smiles_canonical: str = prep_out["smiles_canonical"]
+    molecule_id: str = args.molecule_id or molecule_id_from_smiles(smiles_canonical)
+
+    # --- mm -----------------------------------------------------------------
+    mm_result = mm.submit(manifest, workspace, config)
+    manifest["stages"]["mm"] = mm_result
+    if mm_result["status"] != "done":
+        print("status: failed (mm)", file=sys.stderr)
+        print(
+            f"reason: {mm_result.get('failure_reason', '<unknown>')}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # --- build full manifest ------------------------------------------------
+    for stage_name in STAGE_ORDER:
+        if stage_name not in ("prep", "mm"):
+            manifest["stages"].setdefault(stage_name, {"status": "pending"})
+
+    manifest.update(
+        {
+            "schema_version": 1,
+            "molecule_id": molecule_id,
+            "smiles_canonical": smiles_canonical,
+            "config_hash": compute_config_hash(config),
+            "config_path": str(config_path.resolve()),
+            "created_at": _now_iso(),
+            "options": {"thermal": args.thermal},
+        }
+    )
+    atomic_write_json(workspace / "manifest.json", manifest)
+
+    # --- generate PBS script ------------------------------------------------
+    pbs_text = generate_orchestrator_pbs(workspace, config, sys.executable)
+    pbs_script = workspace / "orchestrator.pbs.sh"
+    pbs_script.write_text(pbs_text, encoding="utf-8")
+
+    if args.dry_run:
+        print("# PBS script (dry-run, not submitted):")
+        print(pbs_text)
+        print(f"workspace: {workspace}")
+        print(f"molecule_id: {molecule_id}")
+        print(f"manifest: {workspace / 'manifest.json'}")
+        return 0
+
+    # --- qsub ---------------------------------------------------------------
+    try:
+        proc = subprocess.run(
+            ["qsub", str(pbs_script)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        jobid = parse_jobid_from_qsub_stdout(proc.stdout)
+    except subprocess.CalledProcessError as exc:
+        print("status: failed (qsub)", file=sys.stderr)
+        print(
+            f"reason: qsub exited {exc.returncode}: {exc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        print("status: failed (qsub)", file=sys.stderr)
+        print(f"reason: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"submitted: {jobid}")
+    print(f"workspace: {workspace}")
+    print(f"molecule_id: {molecule_id}")
+    print(f"pbs_script: {pbs_script}")
+    print(f"log: {workspace / 'orchestrator.log'}")
+    return 0
+
+
+def _run_predict(args: argparse.Namespace) -> int:
+    workspace = (args.workspace or Path.cwd()).resolve()
+    manifest_path = workspace / "manifest.json"
+
+    if not manifest_path.is_file():
+        print("status: failed", file=sys.stderr)
+        print(
+            f"reason: manifest.json not found in {workspace}. "
+            "Run 'predict_dr.py submit' first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    with manifest_path.open(encoding="utf-8") as fh:
+        manifest = json.load(fh)
+
+    config_path_str: str | None = manifest.get("config_path")
+    config_path = Path(config_path_str) if config_path_str else _resolve_config(None)
+    config = load_config(config_path)
+
+    try:
+        run(workspace, config)
+    except PipelineError as exc:
+        print(f"pipeline error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _run_status(args: argparse.Namespace) -> int:
+    workspace = (args.workspace or Path.cwd()).resolve()
+    manifest_path = workspace / "manifest.json"
+
+    if not manifest_path.is_file():
+        print("status: failed", file=sys.stderr)
+        print(f"reason: manifest.json not found in {workspace}", file=sys.stderr)
+        return 1
+
+    with manifest_path.open(encoding="utf-8") as fh:
+        manifest = json.load(fh)
+
+    print(f"molecule_id : {manifest.get('molecule_id', '<unknown>')}")
+    print(f"smiles      : {manifest.get('smiles_input', '<unknown>')}")
+    print(f"workspace   : {workspace}")
+    print()
+    print(f"  {'stage':<14}  {'status':<12}  {'updated':<26}  pbs_ids")
+    print(f"  {'-' * 14}  {'-' * 12}  {'-' * 26}  -------")
+
+    stages = manifest.get("stages", {})
+    for stage_name in STAGE_ORDER:
+        block = stages.get(stage_name, {})
+        status = block.get("status", "pending")
+        updated = (
+            block.get("finished_at")
+            or block.get("submitted_at")
+            or block.get("started_at")
+            or "-"
+        )
+        pbs_ids = block.get("pbs_job_ids", {})
+        ids_str = "  ".join(f"{k}={v}" for k, v in pbs_ids.items()) if pbs_ids else "-"
+        print(f"  {stage_name:<14}  {status:<12}  {updated:<26}  {ids_str}")
+
+    return 0
+
+
+def _run_resume(args: argparse.Namespace) -> int:
+    return _run_predict(args)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -680,5 +975,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_dft_sp(args)
     if args.command == "dft_sp_collect":
         return _run_dft_sp_collect(args)
+    if args.command == "submit":
+        return _run_submit(args)
+    if args.command == "predict":
+        return _run_predict(args)
+    if args.command == "status":
+        return _run_status(args)
+    if args.command == "resume":
+        return _run_resume(args)
     parser.error(f"unknown command: {args.command}")
     return 2

@@ -11,7 +11,13 @@ from spiropyran_dr.stages import dft_sp_stage
 from spiropyran_dr.stages.base import Stage
 
 
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "molecules" / "water_synthetic" / "dft_sp"
+FIXTURE_DIR = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "molecules"
+    / "water_synthetic"
+    / "dft_sp"
+)
 
 LABELS = ("anti_min", "syn_min", "anti_mecp", "syn_mecp")
 
@@ -116,11 +122,15 @@ def test_is_ready_true_when_crest_done_all_labels(tmp_path: Path) -> None:
 # -- submit -----------------------------------------------------------------
 
 
-def test_submit_writes_conformers_xyz(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_writes_conformers_xyz(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _seed_crest_xyz(tmp_path)
     manifest = _crest_done_manifest(tmp_path)
     config = _minimal_config()
-    monkeypatch.setattr(dft_sp_stage, "submit_via_script", lambda *a, **kw: ("99.meta-pbs", ""))
+    monkeypatch.setattr(
+        dft_sp_stage, "submit_via_script", lambda *a, **kw: ("99.meta-pbs", "")
+    )
 
     dft_sp_stage.submit(manifest, tmp_path, config)
 
@@ -132,16 +142,22 @@ def test_submit_writes_conformers_xyz(tmp_path: Path, monkeypatch: pytest.Monkey
         assert len(lines) == 15, f"{label}: expected 15 lines, got {len(lines)}"
 
 
-def test_submit_writes_orca_inp_with_cpcm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_writes_orca_inp_with_cpcm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _seed_crest_xyz(tmp_path)
     manifest = _crest_done_manifest(tmp_path)
     config = _minimal_config()
-    monkeypatch.setattr(dft_sp_stage, "submit_via_script", lambda *a, **kw: ("99.meta-pbs", ""))
+    monkeypatch.setattr(
+        dft_sp_stage, "submit_via_script", lambda *a, **kw: ("99.meta-pbs", "")
+    )
 
     dft_sp_stage.submit(manifest, tmp_path, config)
 
     for label in LABELS:
-        orca_inp = (tmp_path / "dft_sp" / label / "orca.inp").read_text(encoding="utf-8")
+        orca_inp = (tmp_path / "dft_sp" / label / "orca.inp").read_text(
+            encoding="utf-8"
+        )
         assert "r2SCAN-3c" in orca_inp
         assert "CPCM(acetonitrile)" in orca_inp
         assert "nprocs 2" in orca_inp
@@ -151,7 +167,9 @@ def test_submit_writes_orca_inp_with_cpcm(tmp_path: Path, monkeypatch: pytest.Mo
         assert "smd" not in orca_inp.lower()
 
 
-def test_submit_calls_suborca_with_right_args(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_calls_suborca_with_right_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _seed_crest_xyz(tmp_path)
     manifest = _crest_done_manifest(tmp_path)
     config = _minimal_config()
@@ -171,11 +189,15 @@ def test_submit_calls_suborca_with_right_args(tmp_path: Path, monkeypatch: pytes
         assert args == ["orca.inp", "1"]
 
 
-def test_submit_returns_submitted_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_returns_submitted_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _seed_crest_xyz(tmp_path)
     manifest = _crest_done_manifest(tmp_path)
     config = _minimal_config()
-    monkeypatch.setattr(dft_sp_stage, "submit_via_script", lambda *a, **kw: ("42.meta-pbs", ""))
+    monkeypatch.setattr(
+        dft_sp_stage, "submit_via_script", lambda *a, **kw: ("42.meta-pbs", "")
+    )
 
     result = dft_sp_stage.submit(manifest, tmp_path, config)
 
@@ -186,7 +208,9 @@ def test_submit_returns_submitted_status(tmp_path: Path, monkeypatch: pytest.Mon
     assert all(v == "42.meta-pbs" for v in result["pbs_job_ids"].values())
 
 
-def test_submit_returns_failed_on_pbs_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_submit_returns_failed_on_pbs_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _seed_crest_xyz(tmp_path)
     manifest = _crest_done_manifest(tmp_path)
     config = _minimal_config()
@@ -217,14 +241,20 @@ def _make_collect_manifest(workspace: Path) -> dict[str, Any]:
     outputs: dict[str, list[dict[str, Any]]] = {}
     for label in LABELS:
         outputs[label] = [
-            {"conf_id": i, "xyz": f"crest/{label}/filtered/conf_{i}.xyz", "label": label}
+            {
+                "conf_id": i,
+                "xyz": f"crest/{label}/filtered/conf_{i}.xyz",
+                "label": label,
+            }
             for i in range(3)
         ]
     return {"stages": {"crest": {"status": "done", "outputs": outputs}}}
 
 
 @pytest.mark.parametrize("label", LABELS)
-def test_collect_parses_energies_for_water_synthetic(label: str, tmp_path: Path) -> None:
+def test_collect_parses_energies_for_water_synthetic(
+    label: str, tmp_path: Path
+) -> None:
     orca_out_src = FIXTURE_DIR / label / "orca.out"
     _setup_collect_workspace(tmp_path, label, orca_out_src)
 
@@ -258,7 +288,9 @@ def test_collect_fails_on_missing_orca_out(tmp_path: Path) -> None:
 
 def test_collect_fails_on_abnormal_termination(tmp_path: Path) -> None:
     # anti_min_failed has FINAL SINGLE POINT ENERGY but no ORCA TERMINATED NORMALLY.
-    _setup_collect_workspace(tmp_path, "anti_min", FIXTURE_DIR / "anti_min_failed" / "orca.out")
+    _setup_collect_workspace(
+        tmp_path, "anti_min", FIXTURE_DIR / "anti_min_failed" / "orca.out"
+    )
     for label in LABELS[1:]:
         _setup_collect_workspace(tmp_path, label, FIXTURE_DIR / label / "orca.out")
 

@@ -83,13 +83,12 @@ def is_ready(manifest: dict[str, Any], workspace: Path) -> bool:
     if crest.get("status") != "done":
         return False
     outputs = crest.get("outputs", {})
-    return all(
-        label in outputs and len(outputs[label]) > 0
-        for label in LABELS
-    )
+    return all(label in outputs and len(outputs[label]) > 0 for label in LABELS)
 
 
-def submit(manifest: dict[str, Any], workspace: Path, config: dict[str, Any]) -> dict[str, Any]:
+def submit(
+    manifest: dict[str, Any], workspace: Path, config: dict[str, Any]
+) -> dict[str, Any]:
     started_at = _now_iso()
     dft_sp_cfg = config["dft_sp"]
     script_path = Path(dft_sp_cfg["script_path"])
@@ -110,14 +109,15 @@ def submit(manifest: dict[str, Any], workspace: Path, config: dict[str, Any]) ->
         xyz_paths = [c["xyz"] for c in conformers]
         # Resolve paths relative to workspace if not absolute.
         abs_xyz_paths = [
-            p if Path(p).is_absolute() else workspace / p
-            for p in xyz_paths
+            p if Path(p).is_absolute() else workspace / p for p in xyz_paths
         ]
         conformers_xyz = label_dir / "conformers.xyz"
         _concatenate_xyz(abs_xyz_paths, conformers_xyz)
 
         orca_inp = label_dir / "orca.inp"
-        _write_orca_inp(orca_inp, method, solvent_name, ncpus, mem_per_core_mb, "conformers.xyz")
+        _write_orca_inp(
+            orca_inp, method, solvent_name, ncpus, mem_per_core_mb, "conformers.xyz"
+        )
 
         try:
             jobid, _ = submit_via_script(
@@ -144,7 +144,9 @@ def submit(manifest: dict[str, Any], workspace: Path, config: dict[str, Any]) ->
     }
 
 
-def collect(manifest: dict[str, Any], workspace: Path, config: dict[str, Any]) -> dict[str, Any]:
+def collect(
+    manifest: dict[str, Any], workspace: Path, config: dict[str, Any]
+) -> dict[str, Any]:
     crest_outputs = manifest["stages"]["crest"]["outputs"]
     outputs: dict[str, list[dict[str, Any]]] = {}
 
