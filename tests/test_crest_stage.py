@@ -4,12 +4,21 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
+from rdkit import Chem
+from rdkit.Chem import AllChem
 
 from spiropyran_dr import pbs_utils
+from spiropyran_dr.config_utils import load_config
 from spiropyran_dr.pbs_utils import PBSSubmitError
 from spiropyran_dr.stages import crest_stage
+from spiropyran_dr.stages import prep as prep_stage
 from spiropyran_dr.stages.base import Stage
+from spiropyran_dr.stages.mm import (
+    indoline_ring_atom_indices,
+    label_conformer,
+)
 
 from conftest import fixture_molecule_dir, fixture_molecule_names
 
@@ -138,7 +147,11 @@ def _full_manifest(workspace: Path) -> dict[str, Any]:
         "stages": {
             "prep": {
                 "status": "done",
-                "outputs": {"spiro_carbon_idx": 0, "chromene_oxygen_idx": 1},
+                "outputs": {
+                    "spiro_carbon_idx": 0,
+                    "chromene_oxygen_idx": 1,
+                    "indoline_nitrogen_idx": 2,
+                },
             },
             "xtb_constr": {
                 "status": "done",
@@ -532,6 +545,155 @@ def test_collect_succeeds_for_all_fixture_molecules(
     _seed_crest_outputs(tmp_path, mol_name)
     result = crest_stage.collect({}, tmp_path, _config())
     assert result["status"] == "done", result
+
+
+# -- geometric re-labelling ---------------------------------------------------
+
+
+def _single_frame_xyz(
+    symbols: list[str],
+    coords: list[tuple[float, float, float]],
+    energy: float,
+) -> str:
+    """Return a single-frame XYZ string in CREST crest_conformers.xyz format."""
+    lines = [str(len(symbols)), f"        {energy:.8f}"]
+    for sym, (x, y, z) in zip(symbols, coords):
+        lines.append(f" {sym}  {x:.10f}  {y:.10f}  {z:.10f}")
+    return "\n".join(lines) + "\n"
+
+
+def test_collect_reclassifies_conformers_by_dihedral(
+    tmp_path: Path,
+    bips_smiles: str,
+    default_config_path: Path,
+    smarts_config_path: Path,
+) -> None:
+    """Conformers seeded to the wrong-label job are re-assigned by dihedral.
+
+    Both anti_min and syn_min receive the same two-frame XYZ (one frame
+    geometrically anti, one geometrically syn).  After collect() with full
+    prep outputs, each output slot must contain only the geometrically correct
+    conformer.
+    """
+    cfg = load_config(default_config_path)
+    cfg["paths"] = {"smarts": str(smarts_config_path)}
+    prep_ws = tmp_path / "prep_ws"
+    prep_ws.mkdir()
+    prep_result = prep_stage.submit(
+        {"smiles_input": bips_smiles, "stages": {}}, prep_ws, cfg
+    )
+    assert prep_result["status"] == "done", prep_result
+    prep_out = prep_result["outputs"]
+    smiles_canonical = prep_out["smiles_canonical"]
+    spiro_idx = prep_out["spiro_carbon_idx"]
+    chromene_o_idx = prep_out["chromene_oxygen_idx"]
+    indoline_n_idx = prep_out["indoline_nitrogen_idx"]
+
+    # Embed one BIPS conformer; determine its geometric label.
+    mol_h = Chem.AddHs(Chem.MolFromSmiles(smiles_canonical))
+    params = AllChem.ETKDGv3()
+    params.randomSeed = 11
+    assert AllChem.EmbedMolecule(mol_h, params) == 0
+
+    ring = indoline_ring_atom_indices(mol_h, spiro_idx, indoline_n_idx)
+    label_orig = label_conformer(mol_h, 0, ring, spiro_idx, indoline_n_idx, chromene_o_idx)
+
+    conf = mol_h.GetConformer(0)
+    n_atoms = mol_h.GetNumAtoms()
+    symbols = [mol_h.GetAtomWithIdx(i).GetSymbol() for i in range(n_atoms)]
+    orig_coords = [
+        (conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y, conf.GetAtomPosition(i).z)
+        for i in range(n_atoms)
+    ]
+
+    # Mirror chromene O across the indoline ring plane to flip the label.
+    ring_xyz = np.array(
+        [[conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y, conf.GetAtomPosition(i).z]
+         for i in ring]
+    )
+    centroid = ring_xyz.mean(axis=0)
+    _, _, vh = np.linalg.svd(ring_xyz - centroid, full_matrices=False)
+    normal = vh[-1]
+    o_pos = np.array(orig_coords[chromene_o_idx])
+    proj = (o_pos - centroid).dot(normal)
+    new_o = o_pos - 2.0 * proj * normal
+
+    mirrored_coords = list(orig_coords)
+    mirrored_coords[chromene_o_idx] = (float(new_o[0]), float(new_o[1]), float(new_o[2]))
+
+    # Confirm the mirror actually flipped the label.
+    conf.SetAtomPosition(chromene_o_idx, mirrored_coords[chromene_o_idx])
+    label_mirrored = label_conformer(mol_h, 0, ring, spiro_idx, indoline_n_idx, chromene_o_idx)
+    assert {label_orig, label_mirrored} == {"anti", "syn"}
+
+    # Identify which set of coords is anti and which is syn.
+    anti_coords = orig_coords if label_orig == "anti" else mirrored_coords
+    syn_coords = mirrored_coords if label_orig == "anti" else orig_coords
+
+    # WRONG seeding: each job dir receives the opposite-label geometry.
+    # anti_min / anti_mecp get a syn-geometry conformer (lower energy to be
+    # the "lowest" in its job file); syn_min / syn_mecp get anti-geometry.
+    # After geometric re-labelling the pool is split correctly regardless.
+    for label in ("anti_min", "anti_mecp"):
+        d = tmp_path / "crest" / label
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "crest_conformers.xyz").write_text(
+            _single_frame_xyz(symbols, syn_coords, -99.0), encoding="utf-8"
+        )
+    for label in ("syn_min", "syn_mecp"):
+        d = tmp_path / "crest" / label
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "crest_conformers.xyz").write_text(
+            _single_frame_xyz(symbols, anti_coords, -100.0), encoding="utf-8"
+        )
+
+    manifest = {
+        "stages": {
+            "prep": {
+                "status": "done",
+                "outputs": {
+                    "smiles_canonical": smiles_canonical,
+                    "spiro_carbon_idx": spiro_idx,
+                    "chromene_oxygen_idx": chromene_o_idx,
+                    "indoline_nitrogen_idx": indoline_n_idx,
+                },
+            }
+        }
+    }
+    result = crest_stage.collect(manifest, tmp_path, _config())
+    assert result["status"] == "done", result
+
+    # Each output slot must contain only conformers with the matching geo_label.
+    for out_label, expected_geo in (
+        ("anti_min", "anti"),
+        ("syn_min", "syn"),
+        ("anti_mecp", "anti"),
+        ("syn_mecp", "syn"),
+    ):
+        entries = result["outputs"][out_label]
+        assert len(entries) == 1, f"{out_label}: expected 1 conformer, got {len(entries)}"
+        assert entries[0]["geo_label"] == expected_geo, out_label
+        assert entries[0]["label"] == out_label
+
+    # geo_label must be present on all entries (both paths).
+    for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+        for entry in result["outputs"][label]:
+            assert "geo_label" in entry
+
+
+# -- fallback path: geo_label present even without prep outputs ---------------
+
+
+def test_collect_geo_label_present_in_fallback_path(tmp_path: Path) -> None:
+    """geo_label is populated from the job name when prep outputs are absent."""
+    _seed_crest_outputs(tmp_path)
+    result = crest_stage.collect({}, tmp_path, _config())
+    assert result["status"] == "done", result
+    for label in ("anti_min", "syn_min", "anti_mecp", "syn_mecp"):
+        for entry in result["outputs"][label]:
+            assert "geo_label" in entry
+            # Fallback assigns base label ("anti" or "syn") from the job name.
+            assert entry["geo_label"] in ("anti", "syn")
 
 
 # -- pbs_utils integration sanity -----------------------------------------

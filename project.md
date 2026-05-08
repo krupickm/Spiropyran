@@ -760,18 +760,53 @@ seed source and constraint state.
     MetaCentrum), method (GFN2), and ewin (6 kcal/mol) all come from the
     wrapper plus CREST defaults and are owned by `sub_crest.sh`. No other
     CREST flags are threaded from Python.
-- `collect`, per label: parse `crest_conformers.xyz` (multi-frame XYZ).
-  CREST writes the ensemble already sorted lowest-first; the absolute
-  electronic energy (Hartree) for each frame is the first whitespace token
-  of its comment line. The sibling `crest.energies` file holds only
-  relative energies (kcal/mol) and is not consumed. Take up to
-  `ensemble.max_conformers_per_diastereomer` of the leading frames (no
-  extra ewin filter; CREST already applied its own). Write survivors as
-  `crest/{label}/filtered/conf_{i}.xyz` for downstream stages.
-- Output: per label, a list of filtered conformer XYZ paths and CREST
-  energies. The `_mecp` labels' conformers carry the constraint
-  implicitly; downstream DFT does not need to re-impose it because the
-  geometries are already at the MECP-mimic distance.
+- `collect`: parse `crest_conformers.xyz` from all four label directories
+  first, then re-classify every conformer geometrically before writing
+  output. Steps:
+  1. **Parse** all four `crest/{label}/crest_conformers.xyz` files (multi-
+     frame XYZ). CREST writes the ensemble already sorted lowest-first; the
+     absolute electronic energy (Hartree) for each frame is the first
+     whitespace token of its comment line. The sibling `crest.energies`
+     file holds only relative energies (kcal/mol) and is not consumed.
+  2. **Pool within pair type**: merge the parsed frame lists for
+     `anti_min + syn_min` into one pool and `anti_mecp + syn_mecp` into
+     another. This is necessary because CREST aggressively samples across
+     the spiro C–O barrier, so the job that was seeded as "anti" may
+     produce geometrically syn conformers and vice versa.
+  3. **Geometric re-labelling**: for each conformer in each pool, compute
+     the signed dihedral `chromene_O – C_spiro – indoline_N – anchor`
+     using the atom indices from `prep.outputs` and the same sign
+     convention as §10.2 (positive → `anti`, negative → `syn`). This
+     assigns a `geo_label` field to every conformer. Requires
+     `prep.outputs.smiles_canonical`, `spiro_carbon_idx`,
+     `chromene_oxygen_idx`, and `indoline_nitrogen_idx` to be present; if
+     any is absent the stage falls back to deriving `geo_label` from the
+     job name (e.g. `anti_min` → `anti`) without pooling.
+  4. **Cap and write**: within each pool, sort by energy ascending, then
+     partition into `anti` and `syn` sub-lists. Take up to
+     `ensemble.max_conformers_per_diastereomer` from each sub-list (no
+     additional ewin filter; CREST already applied its own). Write
+     survivors as `crest/{label}/filtered/conf_{i}.xyz`.
+- Output: per label, a list of conformer dicts and summary counts.
+  Conformer entry schema:
+
+  ```json
+  {
+    "conf_id":                  0,
+    "xyz":                      "crest/anti_min/filtered/conf_0.xyz",
+    "energy_hartree":           -82.68585677,
+    "relative_energy_kcal_mol": 0.0,
+    "label":                    "anti_min",
+    "geo_label":                "anti"
+  }
+  ```
+
+  `label` is the output slot name; `geo_label` is the geometric
+  diastereomer assignment from the dihedral. In the normal path they
+  agree; in the fallback path `geo_label` is derived from `label`.
+  The `_mecp` labels' conformers carry the C–O constraint implicitly;
+  downstream DFT does not need to re-impose it because the geometries are
+  already at the MECP-mimic distance.
 
 ### 10.5 dft_sp (PBS, one job per conformer per label)
 

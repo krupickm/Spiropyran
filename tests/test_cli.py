@@ -51,11 +51,17 @@ def _retarget_prep_indices_to_fixture(workspace: Path) -> None:
     and chromene_oxygen_idx index a much larger molecule. xtb_collect must
     measure the C-O distance on the fixture, so we overwrite the indices to
     match the fixture atom layout.
+
+    indoline_nitrogen_idx is removed so that crest_stage._build_geo_labeller
+    sees an incomplete prep output and falls back to job-name labelling; the
+    CREST fixture XYZ files are water molecules, not spiropyrans, so geometric
+    re-labelling would fail on them anyway.
     """
     path = workspace / "manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["stages"]["prep"]["outputs"]["spiro_carbon_idx"] = 0
     manifest["stages"]["prep"]["outputs"]["chromene_oxygen_idx"] = 1
+    manifest["stages"]["prep"]["outputs"].pop("indoline_nitrogen_idx", None)
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
